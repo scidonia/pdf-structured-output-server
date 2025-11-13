@@ -12,6 +12,7 @@ import os
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, create_model
+from typing import Optional
 import uvicorn
 
 from .product_feed_generator import ProductFeedGenerator
@@ -58,7 +59,7 @@ class ProductEnrichmentServer:
             files: List[UploadFile] = File(..., description="PDF files to process"),
             schema_name: str = Form(..., description="Name for the extraction schema"),
             json_schema: str = Form(..., description="JSON schema for extraction"),
-            authorization: str = Header(..., alias="Authorization", description="Bearer token for BookWyrm API")
+            authorization: Optional[str] = Header(None, alias="authorization", description="Bearer token for BookWyrm API")
         ):
             """Process PDF files and return streaming results.
             
@@ -72,9 +73,15 @@ class ProductEnrichmentServer:
                 Streaming SSE response with extraction results
             """
             try:
+                # Debug: Log the received authorization header
+                logger.info(f"Received authorization header: {authorization}")
+                
                 # Extract API key from Authorization header
+                if not authorization:
+                    raise HTTPException(status_code=401, detail="Authorization header is missing")
+                
                 if not authorization.startswith("Bearer "):
-                    raise HTTPException(status_code=401, detail="Authorization header must start with 'Bearer '")
+                    raise HTTPException(status_code=401, detail=f"Authorization header must start with 'Bearer ', got: '{authorization[:20]}...'")
                 
                 api_key = authorization[7:]  # Remove "Bearer " prefix
                 if not api_key:
