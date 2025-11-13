@@ -58,7 +58,7 @@ class ProductEnrichmentServer:
             files: List[UploadFile] = File(..., description="PDF files to process"),
             schema_name: str = Form(..., description="Name for the extraction schema"),
             json_schema: str = Form(..., description="JSON schema for extraction"),
-            authorization: str = Header(..., description="Bearer token for BookWyrm API")
+            authorization: str = Header(..., alias="Authorization", description="Bearer token for BookWyrm API")
         ):
             """Process PDF files and return streaming results.
             
