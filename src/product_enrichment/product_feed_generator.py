@@ -19,9 +19,14 @@ from .models import (
     ValidationResult,
     EnableSearchEnum,
     EnableCheckoutEnum,
-    AvailabilityEnum,
-    ProductExtractionModel
+    AvailabilityEnum
 )
+
+# Import user-configurable product model
+try:
+    from models.models import ProductExtractionModel
+except ImportError:
+    raise ImportError("Product extraction model not found. Please ensure models/models.py exists with ProductExtractionModel defined.")
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -149,24 +154,31 @@ class ProductFeedGenerator:
             if not final_result or not final_result.summary:
                 raise ValueError("No structured summary received from BookWyrm API")
             
-            # Convert the Pydantic model result to dictionary
-            if isinstance(final_result.summary, ProductExtractionModel):
+            # Convert the result to dictionary - handle any Pydantic model generically
+            if hasattr(final_result.summary, 'model_dump'):
+                # It's a Pydantic model (could be ProductExtractionModel or any other)
                 product_data = final_result.summary.model_dump()
             elif isinstance(final_result.summary, dict):
                 product_data = final_result.summary
             elif isinstance(final_result.summary, str):
                 # Handle case where API returns a string instead of structured data
                 console.print(f"[yellow]Warning: Received string response instead of structured data for {pdf_path.name}[/yellow]")
-                product_data = {
+                # Create minimal fallback using model fields if available
+                fallback_data = {
                     "id": pdf_path.stem,
                     "title": f"Product from {pdf_path.name}",
-                    "description": final_result.summary[:1000] if final_result.summary else "No description available",
-                    "brand": None,
-                    "product_category": None,
-                    "price": None,
-                    "material": None,
-                    "weight": None
+                    "description": final_result.summary[:1000] if final_result.summary else "No description available"
                 }
+                # Add None values for any other fields defined in the model
+                try:
+                    model_fields = ProductExtractionModel.model_fields
+                    for field_name in model_fields:
+                        if field_name not in fallback_data:
+                            fallback_data[field_name] = None
+                except Exception:
+                    # If we can't inspect the model, just use basic fallback
+                    pass
+                product_data = fallback_data
             else:
                 raise ValueError(f"Unexpected summary type: {type(final_result.summary)}")
             
@@ -197,15 +209,19 @@ class ProductFeedGenerator:
         """Convert extracted product data to ProductFeedItem model.
         
         Args:
-            product_data: Raw product data from API
+            product_data: Raw product data from API (structure determined by user model)
             
         Returns:
             Validated ProductFeedItem instance
         """
         # Generate required fields with defaults
-        product_id = product_data.get("id", "UNKNOWN")
-        title = product_data.get("title", "Unknown Product")[:150]
-        description = product_data.get("description", "No description available")[:5000]
+        product_id = str(product_data.get("id", "UNKNOWN"))
+        title = str(product_data.get("title", "Unknown Product"))[:150]
+        description = str(product_data.get("description", "No description available"))[:5000]
+        
+        # Helper function to safely convert values to strings
+        def safe_str_or_none(value):
+            return str(value) if value is not None else None
         
         # Create basic product feed item
         feed_item = ProductFeedItem(
@@ -219,11 +235,11 @@ class ProductFeedGenerator:
             description=description,
             link="https://example.com/product/" + product_id,  # Placeholder URL
             
-            # Optional fields - ensure strings or None
-            brand=str(product_data.get("brand")) if product_data.get("brand") is not None else None,
-            product_category=str(product_data.get("product_category")) if product_data.get("product_category") is not None else None,
-            material=str(product_data.get("material")) if product_data.get("material") is not None else None,
-            weight=str(product_data.get("weight")) if product_data.get("weight") is not None else None,
+            # Optional fields - handle any field from user model generically
+            brand=safe_str_or_none(product_data.get("brand")),
+            product_category=safe_str_or_none(product_data.get("product_category")),
+            material=safe_str_or_none(product_data.get("material")),
+            weight=safe_str_or_none(product_data.get("weight")),
             
             # Price (required) - ensure it's always a string
             price=str(product_data.get("price") or "0.00 USD"),
