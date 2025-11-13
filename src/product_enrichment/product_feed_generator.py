@@ -155,6 +155,33 @@ class ProductFeedGenerator:
                     
                 # Debug: Check prompt length and content
                 console.print(f"[blue]📝[/blue] Prompt length: {len(prompt)} chars for {Path(extracted_text.file_path).name}")
+                
+                # Debug: Show what we're actually sending to the API
+                console.print(f"[yellow]🔍 DEBUG: First 200 chars of prompt:[/yellow]")
+                console.print(f"[dim]{prompt[:200]}...[/dim]")
+                
+                # Debug: Show the actual API call parameters
+                api_params = {
+                    "content": prompt,
+                    "max_tokens": self.config.max_tokens,
+                    "model_strength": "swift"
+                }
+                console.print(f"[yellow]🔍 DEBUG: API parameters:[/yellow]")
+                console.print(f"[dim]max_tokens: {api_params['max_tokens']}, model_strength: {api_params['model_strength']}[/dim]")
+                
+                # Debug: Save the full prompt to a file for inspection
+                debug_file = Path(f"debug_prompt_{Path(extracted_text.file_path).stem}.txt")
+                try:
+                    with open(debug_file, 'w', encoding='utf-8') as f:
+                        f.write("=== PROMPT BEING SENT TO BOOKWYRM API ===\n\n")
+                        f.write(prompt)
+                        f.write("\n\n=== END PROMPT ===\n")
+                        f.write(f"\nPrompt length: {len(prompt)} characters\n")
+                        f.write(f"Max tokens: {self.config.max_tokens}\n")
+                        f.write(f"Model strength: swift\n")
+                    console.print(f"[yellow]🔍 DEBUG: Full prompt saved to {debug_file}[/yellow]")
+                except Exception as debug_error:
+                    console.print(f"[yellow]Warning: Could not save debug file: {debug_error}[/yellow]")
                     
                 # Use the BookWyrm client's stream_summarize method correctly
                 # According to the docs, we should pass content as a string
