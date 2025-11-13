@@ -260,15 +260,18 @@ class ProductEnrichmentServer:
             # Create dynamic model
             dynamic_model = create_model(schema_name, **field_definitions)
             logger.info(f"Successfully created dynamic model '{schema_name}' with fields: {list(field_definitions.keys())}")
+            
+            # Debug: Test the model by creating an instance
+            test_instance = dynamic_model()
+            logger.info(f"Dynamic model test instance fields: {list(test_instance.model_fields.keys())}")
+            
             return dynamic_model
             
         except Exception as e:
             logger.error(f"Error creating dynamic model: {e}")
             logger.error(f"Schema dict: {schema_dict}")
-            # Fallback to basic model
-            from models.models import ProductExtractionModel
-            logger.warning("Falling back to ProductExtractionModel")
-            return ProductExtractionModel
+            # Don't fallback - raise the error so we can see what's wrong
+            raise Exception(f"Failed to create dynamic model: {e}")
     
     def _json_type_to_python_type(self, field_schema: Dict[str, Any]):
         """Convert JSON schema type to Python type.
