@@ -49,8 +49,19 @@ class ProductFeedGenerator:
         Returns:
             Formatted prompt for the BookWyrm API
         """
-        return f"""
-Please analyze the following document text and extract structured product information suitable for an e-commerce product feed. 
+        # Clean and truncate text content to avoid JSON issues
+        cleaned_text = text_content.replace('\x00', '').replace('\r\n', '\n').replace('\r', '\n')
+        # Truncate to avoid token limits and ensure we don't break mid-word
+        truncated_text = cleaned_text[:4000]
+        if len(cleaned_text) > 4000:
+            # Find the last complete sentence or line break
+            last_period = truncated_text.rfind('.')
+            last_newline = truncated_text.rfind('\n')
+            cutoff = max(last_period, last_newline)
+            if cutoff > 3000:  # Only use if it's not too short
+                truncated_text = truncated_text[:cutoff + 1]
+        
+        return f"""Please analyze the following document text and extract structured product information suitable for an e-commerce product feed. 
 
 Based on the content, identify and extract the following information in JSON format:
 
@@ -74,8 +85,7 @@ If any information is not available in the text, use null for that field.
 Focus on extracting factual, specific information rather than marketing language.
 
 Document text:
-{text_content[:4000]}  # Truncate to avoid token limits
-"""
+{truncated_text}"""
     
     def _extract_product_data_from_text(self, extracted_text: ExtractedText) -> Dict[str, Any]:
         """Extract structured product data from text using BookWyrm API.
@@ -93,14 +103,25 @@ Document text:
             summary_response = None
             console.print(f"[blue]🤖[/blue] Processing {Path(extracted_text.file_path).name} with BookWyrm API...")
             
-            for response in self.client.stream_summarize(
-                content=prompt,
-                max_tokens=self.config.max_tokens,
-                model_strength="swift"  # Use swift for faster processing
-            ):
-                if isinstance(response, SummaryResponse):
-                    summary_response = response.summary
-                    break
+            try:
+                for response in self.client.stream_summarize(
+                    content=prompt,
+                    max_tokens=self.config.max_tokens,
+                    model_strength="swift"  # Use swift for faster processing
+                ):
+                    if isinstance(response, SummaryResponse):
+                        summary_response = response.summary
+                        break
+            except Exception as api_error:
+                error_console.print(f"[red]BookWyrm API error for {Path(extracted_text.file_path).name}: {api_error}[/red]")
+                # Return fallback data structure
+                return {
+                    "id": Path(extracted_text.file_path).stem,
+                    "title": f"Product from {Path(extracted_text.file_path).name}",
+                    "description": f"Product information extracted from PDF document. API processing failed: {str(api_error)[:200]}",
+                    "source_file": extracted_text.file_path,
+                    "page_count": extracted_text.page_count
+                }
             
             if not summary_response:
                 raise ValueError("No summary response received from BookWyrm API")
