@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 import tempfile
 import os
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, create_model
 import uvicorn
@@ -29,14 +29,12 @@ class SchemaRequest(BaseModel):
 class ProductEnrichmentServer:
     """FastAPI server for product enrichment with streaming responses."""
     
-    def __init__(self, api_key: str, max_workers: int = 5):
+    def __init__(self, max_workers: int = 5):
         """Initialize the server.
         
         Args:
-            api_key: BookWyrm API key
             max_workers: Number of parallel workers for processing
         """
-        self.api_key = api_key
         self.max_workers = max_workers
         self.app = FastAPI(
             title="Product Enrichment API",
@@ -53,7 +51,8 @@ class ProductEnrichmentServer:
         async def process_pdfs(
             files: List[UploadFile] = File(..., description="PDF files to process"),
             schema_name: str = Form(..., description="Name for the extraction schema"),
-            json_schema: str = Form(..., description="JSON schema for extraction")
+            json_schema: str = Form(..., description="JSON schema for extraction"),
+            authorization: str = Header(..., description="Bearer token for BookWyrm API")
         ):
             """Process PDF files and return streaming results.
             
@@ -61,11 +60,20 @@ class ProductEnrichmentServer:
                 files: List of PDF files
                 schema_name: Name for the extraction schema
                 json_schema: JSON schema definition as string
+                authorization: Authorization header with Bearer token
                 
             Returns:
                 Streaming SSE response with extraction results
             """
             try:
+                # Extract API key from Authorization header
+                if not authorization.startswith("Bearer "):
+                    raise HTTPException(status_code=401, detail="Authorization header must start with 'Bearer '")
+                
+                api_key = authorization[7:]  # Remove "Bearer " prefix
+                if not api_key:
+                    raise HTTPException(status_code=401, detail="API key is required")
+                
                 # Validate JSON schema
                 try:
                     schema_dict = json.loads(json_schema)
@@ -84,7 +92,7 @@ class ProductEnrichmentServer:
                 
                 # Create streaming response
                 return StreamingResponse(
-                    self._process_pdfs_stream(pdf_files, schema_name, schema_dict),
+                    self._process_pdfs_stream(pdf_files, schema_name, schema_dict, api_key),
                     media_type="text/event-stream",
                     headers={
                         "Cache-Control": "no-cache",
@@ -107,7 +115,8 @@ class ProductEnrichmentServer:
         self, 
         pdf_files: List[UploadFile], 
         schema_name: str, 
-        schema_dict: Dict[str, Any]
+        schema_dict: Dict[str, Any],
+        api_key: str
     ):
         """Stream processing results for PDF files.
         
@@ -115,6 +124,7 @@ class ProductEnrichmentServer:
             pdf_files: List of uploaded PDF files
             schema_name: Name for the extraction schema
             schema_dict: JSON schema definition
+            api_key: BookWyrm API key from Authorization header
             
         Yields:
             SSE formatted messages with processing results
@@ -139,9 +149,9 @@ class ProductEnrichmentServer:
                         f.write(content)
                     pdf_paths.append(file_path)
                 
-                # Create generator with dynamic model
+                # Create generator with API key from request
                 config = ProcessingConfig(
-                    api_key=self.api_key,
+                    api_key=api_key,
                     max_tokens=2000,
                     batch_size=self.max_workers
                 )
