@@ -154,6 +154,19 @@ class ProductFeedGenerator:
                 product_data = final_result.summary.model_dump()
             elif isinstance(final_result.summary, dict):
                 product_data = final_result.summary
+            elif isinstance(final_result.summary, str):
+                # Handle case where API returns a string instead of structured data
+                console.print(f"[yellow]Warning: Received string response instead of structured data for {pdf_path.name}[/yellow]")
+                product_data = {
+                    "id": pdf_path.stem,
+                    "title": f"Product from {pdf_path.name}",
+                    "description": final_result.summary[:1000] if final_result.summary else "No description available",
+                    "brand": None,
+                    "product_category": None,
+                    "price": None,
+                    "material": None,
+                    "weight": None
+                }
             else:
                 raise ValueError(f"Unexpected summary type: {type(final_result.summary)}")
             
@@ -206,14 +219,14 @@ class ProductFeedGenerator:
             description=description,
             link="https://example.com/product/" + product_id,  # Placeholder URL
             
-            # Optional fields
-            brand=product_data.get("brand"),
-            product_category=product_data.get("product_category"),
-            material=product_data.get("material"),
-            weight=product_data.get("weight"),
+            # Optional fields - ensure strings or None
+            brand=str(product_data.get("brand")) if product_data.get("brand") is not None else None,
+            product_category=str(product_data.get("product_category")) if product_data.get("product_category") is not None else None,
+            material=str(product_data.get("material")) if product_data.get("material") is not None else None,
+            weight=str(product_data.get("weight")) if product_data.get("weight") is not None else None,
             
-            # Price (required)
-            price=product_data.get("price", "0.00 USD"),
+            # Price (required) - ensure it's always a string
+            price=str(product_data.get("price") or "0.00 USD"),
             
             # Availability (required)
             availability=AvailabilityEnum.IN_STOCK,
