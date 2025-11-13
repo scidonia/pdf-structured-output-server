@@ -19,6 +19,13 @@ from .models import (
 )
 
 # Import user-configurable product model
+import sys
+from pathlib import Path
+
+# Add the project root to Python path to find models directory
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
 try:
     from models.models import ProductExtractionModel
 except ImportError:
