@@ -165,12 +165,7 @@ class ProductFeedGenerator:
                     product_data = model_instance.model_dump()
                     
                 except json.JSONDecodeError as json_error:
-                    # If it's not valid JSON, treat as plain text
-                    console.print(f"[yellow]Warning: Received non-JSON string response for {pdf_path.name}[/yellow]")
-                    console.print(f"[yellow]String response content:[/yellow]")
-                    console.print(f"[dim]{final_result.summary[:500]}{'...' if len(final_result.summary) > 500 else ''}[/dim]")
-                    
-                    # Save full string response to debug file
+                    # If it's not valid JSON, treat as plain text - save debug info silently
                     debug_file = Path(f"debug_string_response_{pdf_path.stem}.txt")
                     try:
                         with open(debug_file, 'w', encoding='utf-8') as f:
@@ -179,9 +174,8 @@ class ProductFeedGenerator:
                             f.write(f"JSON Parse Error: {json_error}\n")
                             f.write(f"Response length: {len(final_result.summary)} characters\n\n")
                             f.write(final_result.summary)
-                        console.print(f"[yellow]Full string response saved to {debug_file}[/yellow]")
-                    except Exception as debug_error:
-                        console.print(f"[yellow]Warning: Could not save debug file: {debug_error}[/yellow]")
+                    except Exception:
+                        pass  # Silently ignore debug file creation errors
                     
                     # Create minimal fallback using model fields if available
                     fallback_data = {
@@ -201,8 +195,7 @@ class ProductFeedGenerator:
                     product_data = fallback_data
                     
                 except Exception as model_error:
-                    # If model creation fails, log the error but use the JSON data directly
-                    console.print(f"[yellow]Warning: Could not create model instance for {pdf_path.name}: {model_error}[/yellow]")
+                    # If model creation fails, use the JSON data directly (log silently)
                     product_data = json_data
             else:
                 raise ValueError(f"Unexpected summary type: {type(final_result.summary)}")

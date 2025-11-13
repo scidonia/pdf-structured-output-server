@@ -73,13 +73,17 @@ def process(
     
     generator = ProductFeedGenerator(config)
     
+    # Create a separate console for progress to avoid interference
+    from rich.console import Console as ProgressConsole
+    progress_console = ProgressConsole()
+    
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         TaskProgressColumn(),
         TimeElapsedColumn(),
-        console=console,
+        console=progress_console,
     ) as progress:
         # Process PDFs directly with BookWyrm API (PDF extraction + text processing + summarization)
         process_task = progress.add_task("Processing PDFs with BookWyrm API...", total=len(pdf_files))
