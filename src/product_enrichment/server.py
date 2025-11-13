@@ -18,7 +18,10 @@ import uvicorn
 from .product_feed_generator import ProductFeedGenerator
 from .models import ProcessingConfig
 
+# Configure logging to ensure we see debug messages
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 def create_app():
@@ -149,7 +152,18 @@ class ProductEnrichmentServer:
             yield f"data: {json.dumps({'type': 'status', 'message': f'Starting processing of {len(pdf_files)} files'})}\n\n"
             
             # Create dynamic Pydantic model from JSON schema
-            dynamic_model = self._create_dynamic_model(schema_name, schema_dict)
+            logger.info(f"About to create dynamic model with schema: {schema_dict}")
+            try:
+                dynamic_model = self._create_dynamic_model(schema_name, schema_dict)
+                logger.info(f"Dynamic model created successfully: {dynamic_model}")
+            except Exception as model_error:
+                logger.error(f"CRITICAL: Failed to create dynamic model: {model_error}")
+                error_data = {
+                    'type': 'fatal_error',
+                    'error': f'Failed to create dynamic model: {str(model_error)}'
+                }
+                yield f"data: {json.dumps(error_data)}\n\n"
+                return
             
             # Create temporary directory for PDF files
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -249,27 +263,39 @@ class ProductEnrichmentServer:
             properties = schema_dict.get('properties', {})
             
             # Debug: Log the schema being used
-            logger.info(f"Creating dynamic model '{schema_name}' with {len(properties)} fields: {list(properties.keys())}")
+            logger.info(f"SCHEMA DEBUG: Creating dynamic model '{schema_name}' with {len(properties)} fields: {list(properties.keys())}")
+            logger.info(f"SCHEMA DEBUG: Full schema dict: {schema_dict}")
+            
+            if not properties:
+                raise ValueError(f"No properties found in schema: {schema_dict}")
             
             # Convert JSON schema properties to Pydantic field definitions
             field_definitions = {}
             for field_name, field_schema in properties.items():
+                logger.info(f"SCHEMA DEBUG: Processing field '{field_name}' with schema: {field_schema}")
                 field_type = self._json_type_to_python_type(field_schema)
                 field_definitions[field_name] = (field_type, None)  # (type, default)
+                logger.info(f"SCHEMA DEBUG: Field '{field_name}' mapped to type: {field_type}")
+            
+            logger.info(f"SCHEMA DEBUG: Final field definitions: {field_definitions}")
             
             # Create dynamic model
+            logger.info(f"SCHEMA DEBUG: About to call create_model with name='{schema_name}' and fields={list(field_definitions.keys())}")
             dynamic_model = create_model(schema_name, **field_definitions)
-            logger.info(f"Successfully created dynamic model '{schema_name}' with fields: {list(field_definitions.keys())}")
+            logger.info(f"SCHEMA DEBUG: Successfully created dynamic model '{schema_name}' class: {dynamic_model}")
             
             # Debug: Test the model by creating an instance
             test_instance = dynamic_model()
-            logger.info(f"Dynamic model test instance fields: {list(test_instance.model_fields.keys())}")
+            logger.info(f"SCHEMA DEBUG: Test instance created successfully with fields: {list(test_instance.model_fields.keys())}")
             
             return dynamic_model
             
         except Exception as e:
-            logger.error(f"Error creating dynamic model: {e}")
-            logger.error(f"Schema dict: {schema_dict}")
+            logger.error(f"SCHEMA ERROR: Error creating dynamic model: {e}")
+            logger.error(f"SCHEMA ERROR: Exception type: {type(e)}")
+            logger.error(f"SCHEMA ERROR: Schema dict: {schema_dict}")
+            import traceback
+            logger.error(f"SCHEMA ERROR: Full traceback: {traceback.format_exc()}")
             # Don't fallback - raise the error so we can see what's wrong
             raise Exception(f"Failed to create dynamic model: {e}")
     
