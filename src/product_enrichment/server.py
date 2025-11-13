@@ -76,23 +76,15 @@ class ProductEnrichmentServer:
                 # Extract API key from Authorization header using request object
                 authorization = request.headers.get("authorization")
                 
-                # Debug: Log the received authorization header with full content
-                logger.info(f"Received authorization header: '{authorization}'")
-                logger.info(f"Authorization header length: {len(authorization) if authorization else 0}")
-                logger.info(f"Authorization header repr: {repr(authorization)}")
-                
                 if not authorization:
                     raise HTTPException(status_code=401, detail="Authorization header is missing")
                 
                 if not authorization.startswith("Bearer "):
-                    raise HTTPException(status_code=401, detail=f"Authorization header must start with 'Bearer ', got full header: '{authorization}'")
+                    raise HTTPException(status_code=401, detail="Authorization header must start with 'Bearer '")
                 
-                api_key = authorization[7:]  # Remove "Bearer " prefix
+                api_key = authorization[7:].strip()  # Remove "Bearer " prefix and strip whitespace
                 if not api_key:
-                    raise HTTPException(status_code=401, detail="API key is required")
-                
-                # Debug: Log the extracted API key (first few chars only for security)
-                logger.info(f"Extracted API key starts with: '{api_key[:10]}...' (length: {len(api_key)})")
+                    raise HTTPException(status_code=401, detail="Bearer token is missing or empty")
                 
                 # Validate JSON schema
                 try:
@@ -122,6 +114,9 @@ class ProductEnrichmentServer:
                     }
                 )
                 
+            except HTTPException:
+                # Re-raise HTTP exceptions (like 401) without logging
+                raise
             except Exception as e:
                 logger.error(f"Error processing request: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
