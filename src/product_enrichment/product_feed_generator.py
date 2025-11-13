@@ -307,7 +307,7 @@ Document text:
                 errors.append(f"Missing required fields: {', '.join(missing_fields)}")
             
             # Validate each row with progress
-            from rich.progress import Progress, BarColumn, TaskProgressColumn, TimeElapsedColumn
+            from rich.progress import Progress, BarColumn, TaskProgressColumn, TimeElapsedColumn, TextColumn
             
             with Progress(
                 TextColumn("[progress.description]{task.description}"),
