@@ -222,6 +222,53 @@ class ProductFeedGenerator:
                 "weight": None
             }
     
+    def _extract_with_schema(self, phrases: List[TextResult], schema_name: str, schema_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract data using JSON schema directly (for server API).
+        
+        Args:
+            phrases: List of phrasal text results
+            schema_name: Name for the extraction schema
+            schema_dict: JSON schema definition
+            
+        Returns:
+            Extracted data as dictionary
+        """
+        try:
+            # Use BookWyrm's summarization with JSON schema
+            # Note: This assumes BookWyrm API supports json_schema parameter
+            # If not, we'll need to create a temporary dynamic model
+            stream = self.client.stream_summarize(
+                phrases=phrases,
+                json_schema=schema_dict,
+                model_name=schema_name,
+                model_strength="wise",
+                debug=False
+            )
+            
+            # Collect the structured summary
+            final_result = collect_summary_from_stream(stream, verbose=False)
+            
+            if not final_result or not final_result.summary:
+                raise ValueError("No structured summary received from BookWyrm API")
+            
+            # Convert result to dictionary
+            if hasattr(final_result.summary, 'model_dump'):
+                return final_result.summary.model_dump()
+            elif isinstance(final_result.summary, dict):
+                return final_result.summary
+            elif isinstance(final_result.summary, str):
+                # Try to parse as JSON
+                try:
+                    return json.loads(final_result.summary)
+                except json.JSONDecodeError:
+                    return {"raw_response": final_result.summary}
+            else:
+                return {"raw_response": str(final_result.summary)}
+                
+        except Exception as e:
+            logger.error(f"Error in schema-based extraction: {e}")
+            raise
+    
     def _convert_to_product_feed_item(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
         """Convert extracted product data to dictionary for CSV output.
         

@@ -11,7 +11,7 @@ import os
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel
 from typing import Optional
 import uvicorn
 
@@ -151,10 +151,9 @@ class ProductEnrichmentServer:
             # Send initial status
             yield f"data: {json.dumps({'type': 'status', 'message': f'Starting processing of {len(pdf_files)} files'})}\n\n"
             
-            # Create dynamic Pydantic model from JSON schema
-            logger.info(f"Creating dynamic model from schema: {schema_dict}")
-            dynamic_model = self._create_dynamic_model(schema_name, schema_dict)
-            logger.info(f"Created dynamic model: {dynamic_model}")
+            # Pass JSON schema and model name directly to BookWyrm
+            logger.info(f"Using JSON schema directly: {schema_dict}")
+            logger.info(f"Model name: {schema_name}")
             
             # Create temporary directory for PDF files
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -188,7 +187,8 @@ class ProductEnrichmentServer:
                         self._process_single_pdf,
                         generator,
                         pdf_path,
-                        dynamic_model
+                        schema_name,
+                        schema_dict
                     )
                     tasks.append((pdf_path.name, task))
                 
@@ -240,71 +240,20 @@ class ProductEnrichmentServer:
             yield f"data: {json.dumps(error_data)}\n\n"
     
     
-    def _create_dynamic_model(self, schema_name: str, schema_dict: Dict[str, Any]):
-        """Create a dynamic Pydantic model from JSON schema.
-        
-        Args:
-            schema_name: Name for the model
-            schema_dict: JSON schema definition
-            
-        Returns:
-            Dynamic Pydantic model class
-        """
-        try:
-            # Extract properties from JSON schema
-            properties = schema_dict.get('properties', {})
-            
-            if not properties:
-                raise ValueError(f"No properties found in schema: {schema_dict}")
-            
-            # Convert JSON schema properties to Pydantic field definitions
-            field_definitions = {}
-            for field_name, field_schema in properties.items():
-                field_type = self._json_type_to_python_type(field_schema)
-                field_definitions[field_name] = (field_type, None)  # (type, default)
-            
-            # Create dynamic model
-            dynamic_model = create_model(schema_name, **field_definitions)
-            return dynamic_model
-            
-        except Exception as e:
-            logger.error(f"Error creating dynamic model: {e}")
-            raise Exception(f"Failed to create dynamic model: {e}")
-    
-    def _json_type_to_python_type(self, field_schema: Dict[str, Any]):
-        """Convert JSON schema type to Python type.
-        
-        Args:
-            field_schema: JSON schema field definition
-            
-        Returns:
-            Python type for Pydantic field
-        """
-        json_type = field_schema.get('type', 'string')
-        
-        type_mapping = {
-            'string': Optional[str],
-            'integer': Optional[int],
-            'number': Optional[float],
-            'boolean': Optional[bool],
-            'array': Optional[List[str]],  # Simplified - assume string arrays
-            'object': Optional[Dict[str, Any]]
-        }
-        
-        return type_mapping.get(json_type, Optional[str])
-
     def _process_single_pdf(
         self, 
         generator: ProductFeedGenerator, 
         pdf_path: Path, 
-        dynamic_model
+        schema_name: str,
+        schema_dict: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Process a single PDF file.
         
         Args:
             generator: ProductFeedGenerator instance
             pdf_path: Path to PDF file
-            dynamic_model: Dynamic Pydantic model for extraction
+            schema_name: Name for the extraction schema
+            schema_dict: JSON schema definition
             
         Returns:
             Extracted product data
@@ -322,41 +271,18 @@ class ProductEnrichmentServer:
             if not phrases:
                 raise ValueError("No phrases generated from text")
             
-            # Use structured summarization with dynamic model
-            logger.info(f"Using dynamic model {dynamic_model.__name__} for PDF: {pdf_path.name}")
-            stream = generator.client.stream_summarize(
-                phrases=phrases,
-                summary_class=dynamic_model,
-                model_strength="wise",
-                debug=False
-            )
+            # Use structured summarization with JSON schema directly
+            logger.info(f"Using JSON schema '{schema_name}' for PDF: {pdf_path.name}")
             
-            # Collect the structured summary
-            from bookwyrm.utils import collect_summary_from_stream
-            final_result = collect_summary_from_stream(stream, verbose=False)
-            
-            if not final_result or not final_result.summary:
-                raise ValueError("No structured summary received from BookWyrm API")
-            
-            # Convert result to dictionary
-            if hasattr(final_result.summary, 'model_dump'):
-                product_data = final_result.summary.model_dump()
-            elif isinstance(final_result.summary, dict):
-                product_data = final_result.summary
-            elif isinstance(final_result.summary, str):
-                # Try to parse as JSON
-                try:
-                    product_data = json.loads(final_result.summary)
-                except json.JSONDecodeError:
-                    product_data = {"raw_response": final_result.summary}
-            else:
-                product_data = {"raw_response": str(final_result.summary)}
+            # Create a method in generator to handle schema-based summarization
+            result = generator._extract_with_schema(phrases, schema_name, schema_dict)
             
             # Add metadata
-            product_data["source_file"] = pdf_path.name
-            product_data["page_count"] = len(text_content.split('\n'))
+            result["source_file"] = pdf_path.name
+            result["page_count"] = len(text_content.split('\n'))
             
-            return product_data
+            return result
+            
             
         except Exception as e:
             logger.error(f"Error processing {pdf_path}: {e}")
