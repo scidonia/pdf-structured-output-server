@@ -10,55 +10,46 @@ from pydantic import BaseModel, Field
 
 class TechnicalSpecifications(BaseModel):
     """Technical specifications for appliances based on CSV data patterns."""
-    
+
     energy_efficiency_class: Optional[str] = Field(
-        None,
-        description="Energy efficiency rating (e.g., 'A', 'B', 'C')"
+        None, description="Energy efficiency rating (e.g., 'A', 'B', 'C')"
     )
-    
+
     energy_consumption: Optional[str] = Field(
         None,
-        description="Energy consumption per cycle or per 100 cycles (e.g., '49 kWh/100 cycles')"
+        description="Energy consumption per cycle or per 100 cycles (e.g., '49 kWh/100 cycles')",
     )
-    
+
     water_consumption: Optional[str] = Field(
-        None,
-        description="Water consumption per cycle (e.g., '50 l/cycle')"
+        None, description="Water consumption per cycle (e.g., '50 l/cycle')"
     )
-    
+
     spin_speed: Optional[str] = Field(
-        None,
-        description="Maximum spin speed (e.g., '0-1400 rpm')"
+        None, description="Maximum spin speed (e.g., '0-1400 rpm')"
     )
-    
+
     noise_level: Optional[str] = Field(
-        None,
-        description="Noise level during operation (e.g., '72 dB(A) re 1pW')"
+        None, description="Noise level during operation (e.g., '72 dB(A) re 1pW')"
     )
-    
+
     dimensions: Optional[str] = Field(
-        None,
-        description="Product dimensions in mm (e.g., '845x598x590 mm')"
+        None, description="Product dimensions in mm (e.g., '845x598x590 mm')"
     )
-    
+
     voltage: Optional[str] = Field(
-        None,
-        description="Operating voltage (e.g., '220-240 V')"
+        None, description="Operating voltage (e.g., '220-240 V')"
     )
-    
+
     frequency: Optional[str] = Field(
-        None,
-        description="Operating frequency (e.g., '50 Hz')"
+        None, description="Operating frequency (e.g., '50 Hz')"
     )
-    
+
     programme_duration: Optional[str] = Field(
-        None,
-        description="Standard programme duration (e.g., '3:55 h')"
+        None, description="Standard programme duration (e.g., '3:55 h')"
     )
-    
+
     load_capacity: Optional[str] = Field(
-        None,
-        description="Maximum load capacity (e.g., '1-10 kg')"
+        None, description="Maximum load capacity (e.g., '1-10 kg')"
     )
 
 
@@ -116,8 +107,7 @@ class ProductExtractionModel(BaseModel):
     )
 
     specifications: Optional[TechnicalSpecifications] = Field(
-        None,
-        description="Structured technical specifications found in the document"
+        None, description="Structured technical specifications found in the document"
     )
 
     target_audience: Optional[str] = Field(
