@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from bookwyrm import BookWyrmClient
 from bookwyrm.models import SummaryResponse
 from rich.console import Console
+from rich.progress import Progress
 
 from .models import (
     ProcessingConfig, 
@@ -90,6 +91,8 @@ Document text:
             
             # Use BookWyrm API for summarization/extraction
             summary_response = None
+            console.print(f"[blue]🤖[/blue] Processing {Path(extracted_text.file_path).name} with BookWyrm API...")
+            
             for response in self.client.stream_summarize(
                 content=prompt,
                 max_tokens=self.config.max_tokens,
@@ -186,11 +189,18 @@ Document text:
         
         return feed_item
     
-    def generate_product_feed(self, extracted_texts: List[ExtractedText]) -> List[ProductFeedItem]:
+    def generate_product_feed(
+        self, 
+        extracted_texts: List[ExtractedText], 
+        progress: Optional[Progress] = None, 
+        task_id: Optional[int] = None
+    ) -> List[ProductFeedItem]:
         """Generate product feed items from extracted texts.
         
         Args:
             extracted_texts: List of extracted text from PDFs
+            progress: Optional Progress instance for tracking
+            task_id: Optional task ID for progress updates
             
         Returns:
             List of ProductFeedItem objects
@@ -212,8 +222,17 @@ Document text:
                     feed_item = self._convert_to_product_feed_item(product_data)
                     product_items.append(feed_item)
                     console.print(f"[green]✓[/green] Generated product data for {Path(extracted_text.file_path).name}")
+                    
+                    # Update progress if provided
+                    if progress and task_id is not None:
+                        progress.update(task_id, advance=1)
+                        
                 except Exception as e:
                     error_console.print(f"[red]✗ Failed to generate product data for {extracted_text.file_path}: {e}[/red]")
+                    
+                    # Still update progress for failed items
+                    if progress and task_id is not None:
+                        progress.update(task_id, advance=1)
                     continue
         
         if not product_items:
@@ -270,8 +289,11 @@ Document text:
         total_rows = 0
         
         try:
+            console.print(f"[blue]📋[/blue] Loading CSV file: {csv_path}")
             df = pd.read_csv(csv_path)
             total_rows = len(df)
+            
+            console.print(f"[blue]🔍[/blue] Validating {total_rows} rows...")
             
             # Check required columns
             required_fields = [
@@ -284,25 +306,37 @@ Document text:
             if missing_fields:
                 errors.append(f"Missing required fields: {', '.join(missing_fields)}")
             
-            # Validate each row
-            for idx, row in df.iterrows():
-                row_errors = []
+            # Validate each row with progress
+            from rich.progress import Progress, BarColumn, TaskProgressColumn, TimeElapsedColumn
+            
+            with Progress(
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                TimeElapsedColumn(),
+                console=console,
+            ) as progress:
+                validation_task = progress.add_task("Validating rows...", total=total_rows)
                 
-                # Check required field values
-                if pd.isna(row.get('id')) or str(row.get('id')).strip() == '':
-                    row_errors.append(f"Row {idx + 1}: 'id' is required")
-                
-                if pd.isna(row.get('title')) or str(row.get('title')).strip() == '':
-                    row_errors.append(f"Row {idx + 1}: 'title' is required")
-                
-                # Check field length constraints
-                if not pd.isna(row.get('title')) and len(str(row.get('title'))) > 150:
-                    row_errors.append(f"Row {idx + 1}: 'title' exceeds 150 characters")
-                
-                if not pd.isna(row.get('description')) and len(str(row.get('description'))) > 5000:
-                    row_errors.append(f"Row {idx + 1}: 'description' exceeds 5000 characters")
-                
-                errors.extend(row_errors)
+                for idx, row in df.iterrows():
+                    row_errors = []
+                    
+                    # Check required field values
+                    if pd.isna(row.get('id')) or str(row.get('id')).strip() == '':
+                        row_errors.append(f"Row {idx + 1}: 'id' is required")
+                    
+                    if pd.isna(row.get('title')) or str(row.get('title')).strip() == '':
+                        row_errors.append(f"Row {idx + 1}: 'title' is required")
+                    
+                    # Check field length constraints
+                    if not pd.isna(row.get('title')) and len(str(row.get('title'))) > 150:
+                        row_errors.append(f"Row {idx + 1}: 'title' exceeds 150 characters")
+                    
+                    if not pd.isna(row.get('description')) and len(str(row.get('description'))) > 5000:
+                        row_errors.append(f"Row {idx + 1}: 'description' exceeds 5000 characters")
+                    
+                    errors.extend(row_errors)
+                    progress.update(validation_task, advance=1)
             
             is_valid = len(errors) == 0
             

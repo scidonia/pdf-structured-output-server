@@ -4,7 +4,7 @@ import typer
 from typing import Optional
 from pathlib import Path
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
 from .pdf_processor import PDFProcessor
 from .product_feed_generator import ProductFeedGenerator
@@ -78,22 +78,23 @@ def process(
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
         console=console,
     ) as progress:
         # Extract text from PDFs
-        extract_task = progress.add_task("Extracting text from PDFs...", total=None)
-        extracted_texts = processor.extract_texts_from_pdfs(pdf_files)
-        progress.update(extract_task, completed=True)
+        extract_task = progress.add_task("Extracting text from PDFs...", total=len(pdf_files))
+        extracted_texts = processor.extract_texts_from_pdfs(pdf_files, progress, extract_task)
         
         # Generate summaries and product data
-        process_task = progress.add_task("Processing with BookWyrm API...", total=None)
-        product_data = generator.generate_product_feed(extracted_texts)
-        progress.update(process_task, completed=True)
+        process_task = progress.add_task("Processing with BookWyrm API...", total=len(extracted_texts))
+        product_data = generator.generate_product_feed(extracted_texts, progress, process_task)
         
         # Save to CSV
-        save_task = progress.add_task("Saving to CSV...", total=None)
+        save_task = progress.add_task("Saving to CSV...", total=1)
         generator.save_to_csv(product_data, output_file)
-        progress.update(save_task, completed=True)
+        progress.update(save_task, advance=1)
     
     console.print(f"[green]✓ Successfully processed {len(pdf_files)} PDFs and saved results to {output_file}[/green]")
 

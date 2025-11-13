@@ -2,11 +2,12 @@
 
 import logging
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pypdf
 from rich.console import Console
+from rich.progress import Progress
 
 from .models import ProcessingConfig, ExtractedText
 
@@ -67,11 +68,18 @@ class PDFProcessor:
             error_console.print(f"[red]Error processing {pdf_path}: {e}[/red]")
             raise
     
-    def extract_texts_from_pdfs(self, pdf_paths: List[Path]) -> List[ExtractedText]:
+    def extract_texts_from_pdfs(
+        self, 
+        pdf_paths: List[Path], 
+        progress: Optional[Progress] = None, 
+        task_id: Optional[int] = None
+    ) -> List[ExtractedText]:
         """Extract text from multiple PDF files in parallel.
         
         Args:
             pdf_paths: List of paths to PDF files
+            progress: Optional Progress instance for tracking
+            task_id: Optional task ID for progress updates
             
         Returns:
             List of ExtractedText objects
@@ -92,8 +100,17 @@ class PDFProcessor:
                     extracted_text = future.result()
                     extracted_texts.append(extracted_text)
                     console.print(f"[green]✓[/green] Extracted text from {pdf_path.name}")
+                    
+                    # Update progress if provided
+                    if progress and task_id is not None:
+                        progress.update(task_id, advance=1)
+                        
                 except Exception as e:
                     error_console.print(f"[red]✗ Failed to process {pdf_path.name}: {e}[/red]")
+                    
+                    # Still update progress for failed files
+                    if progress and task_id is not None:
+                        progress.update(task_id, advance=1)
                     continue
         
         if not extracted_texts:
