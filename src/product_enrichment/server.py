@@ -76,18 +76,23 @@ class ProductEnrichmentServer:
                 # Extract API key from Authorization header using request object
                 authorization = request.headers.get("authorization")
                 
-                # Debug: Log the received authorization header
-                logger.info(f"Received authorization header: {authorization}")
+                # Debug: Log the received authorization header with full content
+                logger.info(f"Received authorization header: '{authorization}'")
+                logger.info(f"Authorization header length: {len(authorization) if authorization else 0}")
+                logger.info(f"Authorization header repr: {repr(authorization)}")
                 
                 if not authorization:
                     raise HTTPException(status_code=401, detail="Authorization header is missing")
                 
                 if not authorization.startswith("Bearer "):
-                    raise HTTPException(status_code=401, detail=f"Authorization header must start with 'Bearer ', got: '{authorization[:20]}...'")
+                    raise HTTPException(status_code=401, detail=f"Authorization header must start with 'Bearer ', got full header: '{authorization}'")
                 
                 api_key = authorization[7:]  # Remove "Bearer " prefix
                 if not api_key:
                     raise HTTPException(status_code=401, detail="API key is required")
+                
+                # Debug: Log the extracted API key (first few chars only for security)
+                logger.info(f"Extracted API key starts with: '{api_key[:10]}...' (length: {len(api_key)})")
                 
                 # Validate JSON schema
                 try:
