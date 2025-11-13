@@ -142,6 +142,11 @@ def serve(
         "--workers",
         help="Number of parallel workers for processing PDFs"
     ),
+    reload: bool = typer.Option(
+        False,
+        "--reload",
+        help="Enable auto-reload on code changes (development mode)"
+    ),
 ) -> None:
     """Start the product enrichment API server.
     
@@ -161,9 +166,12 @@ def serve(
     console.print(f"[yellow]Health check: http://{host}:{port}/health[/yellow]")
     console.print(f"[cyan]Note: API requests must include 'Authorization: Bearer <your-bookwyrm-api-key>' header[/cyan]")
     
+    if reload:
+        console.print(f"[cyan]Auto-reload enabled - server will restart on code changes[/cyan]")
+    
     try:
         server = ProductEnrichmentServer(max_workers=workers)
-        server.run(host=host, port=port)
+        server.run(host=host, port=port, reload=reload)
     except KeyboardInterrupt:
         console.print(f"[yellow]Server stopped by user[/yellow]")
     except Exception as e:

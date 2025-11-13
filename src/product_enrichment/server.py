@@ -339,11 +339,12 @@ class ProductEnrichmentServer:
             logger.error(f"Error processing {pdf_path}: {e}")
             raise
     
-    def run(self, host: str = "0.0.0.0", port: int = 8000):
+    def run(self, host: str = "0.0.0.0", port: int = 8000, reload: bool = False):
         """Run the server.
         
         Args:
             host: Host to bind to
             port: Port to bind to
+            reload: Enable auto-reload on code changes
         """
-        uvicorn.run(self.app, host=host, port=port)
+        uvicorn.run(self.app, host=host, port=port, reload=reload)
