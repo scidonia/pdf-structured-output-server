@@ -59,8 +59,6 @@ class ProductFeedGenerator:
             Extracted text content
         """
         try:
-            console.print(f"[blue]📄[/blue] Extracting PDF structure for {pdf_path.name} using BookWyrm...")
-            
             # Read PDF as bytes
             pdf_bytes = pdf_path.read_bytes()
             
@@ -81,7 +79,6 @@ class ProductFeedGenerator:
             # Convert PDF pages to text mapping
             mapping = create_pdf_text_mapping_from_pages(pages)
             
-            console.print(f"[green]✓[/green] Extracted {len(mapping.raw_text)} characters from {len(pages)} pages in {pdf_path.name}")
             return mapping.raw_text
             
         except Exception as e:
@@ -99,8 +96,6 @@ class ProductFeedGenerator:
             List of phrasal text results
         """
         try:
-            console.print(f"[blue]📝[/blue] Converting text to phrases for {Path(file_path).name}...")
-            
             # Use BookWyrm's text processing to create phrases
             stream = self.client.stream_process_text(
                 text=text_content,
@@ -110,7 +105,6 @@ class ProductFeedGenerator:
             # Collect phrases using BookWyrm utility
             phrases = collect_phrases_from_stream(stream, verbose=False)
             
-            console.print(f"[green]✓[/green] Created {len(phrases)} phrases from {Path(file_path).name}")
             return phrases
             
         except Exception as e:
@@ -127,8 +121,6 @@ class ProductFeedGenerator:
             Dictionary containing extracted product information
         """
         try:
-            console.print(f"[blue]🤖[/blue] Processing {pdf_path.name} with BookWyrm API...")
-            
             # Step 1: Extract text from PDF using BookWyrm
             text_content = self._extract_pdf_with_bookwyrm(pdf_path)
             
@@ -142,7 +134,6 @@ class ProductFeedGenerator:
                 raise ValueError("No phrases generated from text")
             
             # Step 3: Use structured summarization with Pydantic model
-            console.print(f"[blue]📊[/blue] Extracting structured product data from {len(phrases)} phrases...")
             
             stream = self.client.stream_summarize(
                 phrases=phrases,
@@ -204,7 +195,6 @@ class ProductFeedGenerator:
             product_data["source_file"] = str(pdf_path)
             product_data["page_count"] = len(text_content.split('\n'))  # Rough estimate
             
-            console.print(f"[green]✓[/green] Successfully extracted product data for {pdf_path.name}")
             return product_data
             
         except Exception as e:
@@ -268,7 +258,6 @@ class ProductFeedGenerator:
                     product_data = future.result()
                     feed_item = self._convert_to_product_feed_item(product_data)
                     product_items.append(feed_item)
-                    console.print(f"[green]✓[/green] Generated product data for {pdf_path.name}")
                     
                     # Update progress if provided
                     if progress and task_id is not None:
