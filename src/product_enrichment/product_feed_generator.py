@@ -138,7 +138,7 @@ class ProductFeedGenerator:
             stream = self.client.stream_summarize(
                 phrases=phrases,
                 summary_class=ProductExtractionModel,
-                model_strength="clever",
+                model_strength="wise",
                 debug=False
             )
             
