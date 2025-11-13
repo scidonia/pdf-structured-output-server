@@ -13,11 +13,6 @@ def process_text(content: str, max_length: int = 100) -> List[str]:
     # ... implementation
     return chunks
 
-# Bad
-def process_text(content, max_length=100):
-    chunks = []
-    # ... implementation
-    return chunks
 ```
 
 ### Key Rules:
@@ -62,11 +57,6 @@ class CitationRequest(BaseModel):
         description="Starting chunk index (0-based). Use for pagination or resuming interrupted processing."
     )
 
-# Bad
-class CitationRequest(BaseModel):
-    question: str
-    max_tokens_per_chunk: int = 1000
-    start: Optional[int] = 0
 ```
 
 ### Model Validation
@@ -113,22 +103,6 @@ try:
 except json.JSONDecodeError as e:
     error_console.print(f"[red]Error parsing JSON response: {e}[/red]")
     raise typer.Exit(1)
-```
-
-### Bad Error Handling:
-
-```python
-# Bad - Swallowing exceptions
-try:
-    result = api_call()
-except:
-    pass
-
-# Bad - Generic exception handling without context
-try:
-    result = api_call()
-except Exception as e:
-    print(f"Error: {e}")
 ```
 
 ### Error Handling Guidelines:

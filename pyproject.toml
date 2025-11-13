@@ -5,12 +5,15 @@ description = "Process PDF documents and generate product feed CSV using BookWyr
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "bookwyrm>=0.1.12",
+    "bookwyrm>=0.1.19",
     "typer>=0.12.0",
     "rich>=13.0.0",
     "pydantic>=2.0.0",
     "pypdf>=4.0.0",
     "pandas>=2.0.0",
+    "fastapi>=0.121.1",
+    "uvicorn>=0.38.0",
+    "python-multipart>=0.0.20",
 ]
 
 [build-system]
