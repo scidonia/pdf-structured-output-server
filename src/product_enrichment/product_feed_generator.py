@@ -147,7 +147,7 @@ class ProductFeedGenerator:
             stream = self.client.stream_summarize(
                 phrases=phrases,
                 summary_class=ProductExtractionModel,
-                model_strength="swift",
+                model_strength="clever",
                 debug=False
             )
             
@@ -166,6 +166,21 @@ class ProductFeedGenerator:
             elif isinstance(final_result.summary, str):
                 # Handle case where API returns a string instead of structured data
                 console.print(f"[yellow]Warning: Received string response instead of structured data for {pdf_path.name}[/yellow]")
+                console.print(f"[yellow]String response content:[/yellow]")
+                console.print(f"[dim]{final_result.summary[:500]}{'...' if len(final_result.summary) > 500 else ''}[/dim]")
+                
+                # Save full string response to debug file
+                debug_file = Path(f"debug_string_response_{pdf_path.stem}.txt")
+                try:
+                    with open(debug_file, 'w', encoding='utf-8') as f:
+                        f.write(f"=== STRING RESPONSE FROM BOOKWYRM API ===\n")
+                        f.write(f"File: {pdf_path.name}\n")
+                        f.write(f"Response length: {len(final_result.summary)} characters\n\n")
+                        f.write(final_result.summary)
+                    console.print(f"[yellow]Full string response saved to {debug_file}[/yellow]")
+                except Exception as debug_error:
+                    console.print(f"[yellow]Warning: Could not save debug file: {debug_error}[/yellow]")
+                
                 # Create minimal fallback using model fields if available
                 fallback_data = {
                     "id": pdf_path.stem,
