@@ -20,6 +20,12 @@ from .models import ProcessingConfig
 logger = logging.getLogger(__name__)
 
 
+def create_app():
+    """Factory function to create the FastAPI app for reload mode."""
+    server = ProductEnrichmentServer(max_workers=5)
+    return server.app
+
+
 class SchemaRequest(BaseModel):
     """Request model for schema definition."""
     schema_name: str
@@ -347,4 +353,14 @@ class ProductEnrichmentServer:
             port: Port to bind to
             reload: Enable auto-reload on code changes
         """
-        uvicorn.run(self.app, host=host, port=port, reload=reload)
+        if reload:
+            # For reload to work, we need to pass the app as an import string
+            uvicorn.run(
+                "product_enrichment.server:create_app", 
+                host=host, 
+                port=port, 
+                reload=reload,
+                factory=True
+            )
+        else:
+            uvicorn.run(self.app, host=host, port=port, reload=reload)
