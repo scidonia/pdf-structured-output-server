@@ -66,12 +66,18 @@ class ProductFeedGenerator:
         # Remove or replace other problematic Unicode characters
         cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', cleaned)
         
-        # Normalize line endings
-        cleaned = cleaned.replace('\r\n', '\n').replace('\r', '\n')
+        # Remove characters that can break JSON strings
+        cleaned = cleaned.replace('\\', '\\\\')  # Escape backslashes
+        cleaned = cleaned.replace('"', '\\"')    # Escape quotes
+        cleaned = cleaned.replace('\b', '\\b')   # Escape backspace
+        cleaned = cleaned.replace('\f', '\\f')   # Escape form feed
+        cleaned = cleaned.replace('\n', '\\n')   # Escape newlines
+        cleaned = cleaned.replace('\r', '\\r')   # Escape carriage returns
+        cleaned = cleaned.replace('\t', '\\t')   # Escape tabs
         
-        # Remove excessive whitespace
-        cleaned = re.sub(r'\n\s*\n\s*\n', '\n\n', cleaned)  # Multiple blank lines
-        cleaned = re.sub(r'[ \t]+', ' ', cleaned)  # Multiple spaces/tabs
+        # Remove excessive whitespace (after escaping)
+        cleaned = re.sub(r'\\n\\s*\\n\\s*\\n', '\\n\\n', cleaned)  # Multiple blank lines
+        cleaned = re.sub(r'[ ]+', ' ', cleaned)  # Multiple spaces
         
         # Ensure we have some content
         cleaned = cleaned.strip()
@@ -89,47 +95,28 @@ class ProductFeedGenerator:
         Returns:
             Formatted prompt for the BookWyrm API
         """
-        # Clean text content thoroughly
+        # Clean text content thoroughly for JSON safety
         cleaned_text = self._clean_text_for_json(text_content)
         
         # Truncate to avoid token limits and ensure we don't break mid-word
-        truncated_text = cleaned_text[:4000]
-        if len(cleaned_text) > 4000:
+        truncated_text = cleaned_text[:2000]  # Reduced size for safety
+        if len(cleaned_text) > 2000:
             # Find the last complete sentence or line break
             last_period = truncated_text.rfind('.')
             last_newline = truncated_text.rfind('\n')
             cutoff = max(last_period, last_newline)
-            if cutoff > 3000:  # Only use if it's not too short
+            if cutoff > 1500:  # Only use if it's not too short
                 truncated_text = truncated_text[:cutoff + 1]
         
-        # Escape any remaining problematic characters for the f-string
-        safe_text = truncated_text.replace('\\', '\\\\').replace('{', '{{').replace('}', '}}')
+        # Create a simple, safe prompt without complex formatting
+        prompt = (
+            "Please analyze the following document text and extract product information. "
+            "Provide a JSON response with these fields: id, title, description, brand, "
+            "product_category, price, material, weight. Use null for missing information.\n\n"
+            "Document text:\n" + truncated_text
+        )
         
-        return f"""Please analyze the following document text and extract structured product information suitable for an e-commerce product feed. 
-
-Based on the content, identify and extract the following information in JSON format:
-
-{{
-    "id": "unique product identifier or SKU",
-    "title": "product name/title (max 150 chars)",
-    "description": "detailed product description (max 5000 chars)",
-    "brand": "brand name if mentioned",
-    "product_category": "category path using > separator",
-    "price": "price with currency if mentioned (e.g., '99.99 USD')",
-    "material": "primary materials if mentioned",
-    "weight": "weight with unit if mentioned",
-    "key_features": ["list", "of", "key", "features"],
-    "target_audience": "intended users/demographic",
-    "use_cases": ["primary", "use", "cases"],
-    "specifications": {{"key": "value pairs of technical specs"}},
-    "benefits": ["main", "benefits", "or", "value", "propositions"]
-}}
-
-If any information is not available in the text, use null for that field.
-Focus on extracting factual, specific information rather than marketing language.
-
-Document text:
-{safe_text}"""
+        return prompt
     
     def _create_simple_prompt(self, text_content: str) -> str:
         """Create a simple fallback prompt for basic product extraction.
@@ -140,10 +127,10 @@ Document text:
         Returns:
             Simple prompt for the BookWyrm API
         """
-        # Use only the first 1000 characters and clean them thoroughly
-        cleaned_text = self._clean_text_for_json(text_content)[:1000]
+        # Use only the first 500 characters and clean them thoroughly
+        cleaned_text = self._clean_text_for_json(text_content)[:500]
         
-        return f"Extract the product name, brand, and brief description from this text: {cleaned_text}"
+        return "Extract the product name, brand, and brief description from this text: " + cleaned_text
 
     def _extract_product_data_from_text(self, extracted_text: ExtractedText) -> Dict[str, Any]:
         """Extract structured product data from text using BookWyrm API.
@@ -156,27 +143,21 @@ Document text:
         """
         try:
             prompt = self._create_product_extraction_prompt(extracted_text.text_content)
-            
+                
             # Use BookWyrm API for summarization/extraction
             summary_response = None
             console.print(f"[blue]🤖[/blue] Processing {Path(extracted_text.file_path).name} with BookWyrm API...")
-            
+                
             try:
                 # Validate prompt before sending
                 if not prompt or not prompt.strip():
                     raise ValueError("Empty prompt generated")
-                
+                    
                 # Debug: Check prompt length and content
                 console.print(f"[blue]📝[/blue] Prompt length: {len(prompt)} chars for {Path(extracted_text.file_path).name}")
-                
-                # Test JSON serialization of the prompt
-                try:
-                    import json
-                    test_payload = {"content": prompt, "max_tokens": self.config.max_tokens}
-                    json.dumps(test_payload)  # This will fail if there are JSON issues
-                except (TypeError, ValueError) as json_error:
-                    raise ValueError(f"Prompt contains characters that break JSON serialization: {json_error}")
-                
+                    
+                # Use the BookWyrm client's stream_summarize method correctly
+                # According to the docs, we should pass content as a string
                 for response in self.client.stream_summarize(
                     content=prompt,
                     max_tokens=self.config.max_tokens,
@@ -187,7 +168,7 @@ Document text:
                         break
             except Exception as api_error:
                 error_console.print(f"[red]BookWyrm API error for {Path(extracted_text.file_path).name}: {api_error}[/red]")
-                
+                    
                 # Try with a simpler prompt as fallback
                 console.print(f"[yellow]🔄[/yellow] Trying simple prompt for {Path(extracted_text.file_path).name}...")
                 try:
@@ -200,28 +181,12 @@ Document text:
                         if isinstance(response, SummaryResponse):
                             summary_response = response.summary
                             break
-                    
+                        
                     if summary_response:
                         console.print(f"[green]✓[/green] Simple prompt worked for {Path(extracted_text.file_path).name}")
                 except Exception as simple_error:
                     console.print(f"[red]Simple prompt also failed for {Path(extracted_text.file_path).name}: {simple_error}[/red]")
-                
-                # Debug: Save problematic content for inspection
-                debug_file = Path(f"debug_{Path(extracted_text.file_path).stem}_prompt.txt")
-                try:
-                    with open(debug_file, 'w', encoding='utf-8') as f:
-                        f.write(f"Error: {api_error}\n\n")
-                        f.write(f"Prompt length: {len(prompt)}\n\n")
-                        f.write(f"Original text length: {len(extracted_text.text_content)}\n\n")
-                        f.write("Prompt content:\n")
-                        f.write(prompt)
-                        f.write("\n\n" + "="*50 + "\n")
-                        f.write("Original text content (first 2000 chars):\n")
-                        f.write(extracted_text.text_content[:2000])
-                    console.print(f"[yellow]Debug info saved to {debug_file}[/yellow]")
-                except Exception:
-                    pass  # Don't fail if we can't write debug file
-                
+                    
                 # If we still don't have a response, return fallback data structure
                 if not summary_response:
                     return {
