@@ -249,27 +249,3 @@ class MultiProductExtractionModel(BaseModel):
         ...,
         description="List of products found in the document. Extract each distinct product as a separate item."
     )
-    
-    document_title: Optional[str] = Field(
-        None,
-        description="Overall title or name of the document/catalog if mentioned"
-    )
-    
-    document_type: Optional[str] = Field(
-        None,
-        description="Type of document (e.g., 'product catalog', 'brochure', 'specification sheet')"
-    )
-    
-    total_products_found: Optional[int] = Field(
-        None,
-        description="Total number of distinct products identified in the document"
-    )
-    
-    # Metadata (added by system)
-    source_file: Optional[str] = Field(
-        None, description="Source PDF file path (added by system)"
-    )
-    
-    page_count: Optional[int] = Field(
-        None, description="Number of pages in source document (added by system)"
-    )
