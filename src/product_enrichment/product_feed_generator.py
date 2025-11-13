@@ -8,14 +8,13 @@ import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from bookwyrm import BookWyrmClient
-from bookwyrm.models import SummaryResponse, TextResult, TextSpanResult
-from bookwyrm.utils import collect_phrases_from_stream, collect_summary_from_stream
+from bookwyrm.models import SummaryResponse, TextResult, TextSpanResult, PDFPage
+from bookwyrm.utils import collect_phrases_from_stream, collect_summary_from_stream, collect_pdf_pages_from_stream, create_pdf_text_mapping_from_pages
 from rich.console import Console
 from rich.progress import Progress
 
 from .models import (
     ProcessingConfig, 
-    ExtractedText, 
     ProductFeedItem, 
     ValidationResult,
     EnableSearchEnum,
@@ -42,6 +41,45 @@ class ProductFeedGenerator:
         if config.api_key != "dummy":  # Allow dummy key for validation-only usage
             self.client = BookWyrmClient(api_key=config.api_key)
     
+    def _extract_pdf_with_bookwyrm(self, pdf_path: Path) -> str:
+        """Extract text from PDF using BookWyrm API.
+        
+        Args:
+            pdf_path: Path to PDF file
+            
+        Returns:
+            Extracted text content
+        """
+        try:
+            console.print(f"[blue]📄[/blue] Extracting PDF structure for {pdf_path.name} using BookWyrm...")
+            
+            # Read PDF as bytes
+            pdf_bytes = pdf_path.read_bytes()
+            
+            # Use BookWyrm's PDF extraction
+            stream = self.client.stream_extract_pdf(
+                pdf_bytes=pdf_bytes,
+                filename=pdf_path.name,
+                start_page=1,
+                num_pages=None  # Extract all pages
+            )
+            
+            # Collect PDF pages using BookWyrm utility
+            pages, metadata = collect_pdf_pages_from_stream(stream, verbose=False)
+            
+            if not pages:
+                raise ValueError("No pages extracted from PDF")
+            
+            # Convert PDF pages to text mapping
+            mapping = create_pdf_text_mapping_from_pages(pages)
+            
+            console.print(f"[green]✓[/green] Extracted {len(mapping.raw_text)} characters from {len(pages)} pages in {pdf_path.name}")
+            return mapping.raw_text
+            
+        except Exception as e:
+            error_console.print(f"[red]Error extracting PDF with BookWyrm for {pdf_path}: {e}[/red]")
+            raise
+
     def _process_text_to_phrases(self, text_content: str, file_path: str) -> List[TextResult]:
         """Convert raw text to phrasal format using BookWyrm API.
         
@@ -71,28 +109,31 @@ class ProductFeedGenerator:
             error_console.print(f"[red]Error processing text to phrases for {file_path}: {e}[/red]")
             raise
 
-    def _extract_product_data_from_text(self, extracted_text: ExtractedText) -> Dict[str, Any]:
-        """Extract structured product data from text using proper BookWyrm workflow.
+    def _extract_product_data_from_pdf(self, pdf_path: Path) -> Dict[str, Any]:
+        """Extract structured product data from PDF using complete BookWyrm workflow.
         
         Args:
-            extracted_text: Extracted text from PDF
+            pdf_path: Path to PDF file
             
         Returns:
             Dictionary containing extracted product information
         """
         try:
-            console.print(f"[blue]🤖[/blue] Processing {Path(extracted_text.file_path).name} with BookWyrm API...")
+            console.print(f"[blue]🤖[/blue] Processing {pdf_path.name} with BookWyrm API...")
             
-            # Step 1: Convert raw text to phrasal format
-            phrases = self._process_text_to_phrases(
-                extracted_text.text_content, 
-                extracted_text.file_path
-            )
+            # Step 1: Extract text from PDF using BookWyrm
+            text_content = self._extract_pdf_with_bookwyrm(pdf_path)
+            
+            if not text_content or not text_content.strip():
+                raise ValueError("No text content extracted from PDF")
+            
+            # Step 2: Convert raw text to phrasal format
+            phrases = self._process_text_to_phrases(text_content, str(pdf_path))
             
             if not phrases:
                 raise ValueError("No phrases generated from text")
             
-            # Step 2: Use structured summarization with Pydantic model
+            # Step 3: Use structured summarization with Pydantic model
             console.print(f"[blue]📊[/blue] Extracting structured product data from {len(phrases)} phrases...")
             
             stream = self.client.stream_summarize(
@@ -117,21 +158,21 @@ class ProductFeedGenerator:
                 raise ValueError(f"Unexpected summary type: {type(final_result.summary)}")
             
             # Add metadata
-            product_data["source_file"] = extracted_text.file_path
-            product_data["page_count"] = extracted_text.page_count
+            product_data["source_file"] = str(pdf_path)
+            product_data["page_count"] = len(text_content.split('\n'))  # Rough estimate
             
-            console.print(f"[green]✓[/green] Successfully extracted product data for {Path(extracted_text.file_path).name}")
+            console.print(f"[green]✓[/green] Successfully extracted product data for {pdf_path.name}")
             return product_data
             
         except Exception as e:
-            error_console.print(f"[red]Error extracting product data from {extracted_text.file_path}: {e}[/red]")
+            error_console.print(f"[red]Error extracting product data from {pdf_path}: {e}[/red]")
             # Return minimal fallback data structure
             return {
-                "id": Path(extracted_text.file_path).stem,
-                "title": f"Product from {Path(extracted_text.file_path).name}",
+                "id": pdf_path.stem,
+                "title": f"Product from {pdf_path.name}",
                 "description": f"Product information extracted from PDF document. Processing failed: {str(e)[:200]}",
-                "source_file": extracted_text.file_path,
-                "page_count": extracted_text.page_count,
+                "source_file": str(pdf_path),
+                "page_count": 0,
                 "brand": None,
                 "product_category": None,
                 "price": None,
@@ -191,14 +232,14 @@ class ProductFeedGenerator:
     
     def generate_product_feed(
         self, 
-        extracted_texts: List[ExtractedText], 
+        pdf_paths: List[Path], 
         progress: Optional[Progress] = None, 
         task_id: Optional[int] = None
     ) -> List[ProductFeedItem]:
-        """Generate product feed items from extracted texts.
+        """Generate product feed items from PDF files using complete BookWyrm workflow.
         
         Args:
-            extracted_texts: List of extracted text from PDFs
+            pdf_paths: List of PDF file paths to process
             progress: Optional Progress instance for tracking
             task_id: Optional task ID for progress updates
             
@@ -209,26 +250,26 @@ class ProductFeedGenerator:
         
         with ThreadPoolExecutor(max_workers=self.config.batch_size) as executor:
             # Submit all extraction tasks
-            future_to_text = {
-                executor.submit(self._extract_product_data_from_text, text): text
-                for text in extracted_texts
+            future_to_path = {
+                executor.submit(self._extract_product_data_from_pdf, pdf_path): pdf_path
+                for pdf_path in pdf_paths
             }
             
             # Collect results as they complete
-            for future in as_completed(future_to_text):
-                extracted_text = future_to_text[future]
+            for future in as_completed(future_to_path):
+                pdf_path = future_to_path[future]
                 try:
                     product_data = future.result()
                     feed_item = self._convert_to_product_feed_item(product_data)
                     product_items.append(feed_item)
-                    console.print(f"[green]✓[/green] Generated product data for {Path(extracted_text.file_path).name}")
+                    console.print(f"[green]✓[/green] Generated product data for {pdf_path.name}")
                     
                     # Update progress if provided
                     if progress and task_id is not None:
                         progress.update(task_id, advance=1)
                         
                 except Exception as e:
-                    error_console.print(f"[red]✗ Failed to generate product data for {extracted_text.file_path}: {e}[/red]")
+                    error_console.print(f"[red]✗ Failed to generate product data for {pdf_path}: {e}[/red]")
                     
                     # Still update progress for failed items
                     if progress and task_id is not None:
