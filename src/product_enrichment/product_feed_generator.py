@@ -40,6 +40,46 @@ class ProductFeedGenerator:
         if config.api_key != "dummy":  # Allow dummy key for validation-only usage
             self.client = BookWyrmClient(api_key=config.api_key)
     
+    def _clean_text_for_json(self, text: str) -> str:
+        """Clean text content to ensure it's safe for JSON serialization.
+        
+        Args:
+            text: Raw text content
+            
+        Returns:
+            Cleaned text safe for JSON
+        """
+        import re
+        
+        if not text or not text.strip():
+            return "No text content available"
+        
+        # Remove null bytes and other problematic characters
+        cleaned = text.replace('\x00', '')
+        
+        # Replace various types of quotes and special characters that can break JSON
+        cleaned = cleaned.replace('\u201c', '"').replace('\u201d', '"')  # Smart quotes
+        cleaned = cleaned.replace('\u2018', "'").replace('\u2019', "'")  # Smart apostrophes
+        cleaned = cleaned.replace('\u2013', '-').replace('\u2014', '-')  # En/em dashes
+        cleaned = cleaned.replace('\u00a0', ' ')  # Non-breaking space
+        
+        # Remove or replace other problematic Unicode characters
+        cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', cleaned)
+        
+        # Normalize line endings
+        cleaned = cleaned.replace('\r\n', '\n').replace('\r', '\n')
+        
+        # Remove excessive whitespace
+        cleaned = re.sub(r'\n\s*\n\s*\n', '\n\n', cleaned)  # Multiple blank lines
+        cleaned = re.sub(r'[ \t]+', ' ', cleaned)  # Multiple spaces/tabs
+        
+        # Ensure we have some content
+        cleaned = cleaned.strip()
+        if not cleaned:
+            return "No readable text content found in document"
+            
+        return cleaned
+
     def _create_product_extraction_prompt(self, text_content: str) -> str:
         """Create a prompt for extracting product information from text.
         
@@ -49,8 +89,9 @@ class ProductFeedGenerator:
         Returns:
             Formatted prompt for the BookWyrm API
         """
-        # Clean and truncate text content to avoid JSON issues
-        cleaned_text = text_content.replace('\x00', '').replace('\r\n', '\n').replace('\r', '\n')
+        # Clean text content thoroughly
+        cleaned_text = self._clean_text_for_json(text_content)
+        
         # Truncate to avoid token limits and ensure we don't break mid-word
         truncated_text = cleaned_text[:4000]
         if len(cleaned_text) > 4000:
@@ -60,6 +101,9 @@ class ProductFeedGenerator:
             cutoff = max(last_period, last_newline)
             if cutoff > 3000:  # Only use if it's not too short
                 truncated_text = truncated_text[:cutoff + 1]
+        
+        # Escape any remaining problematic characters for the f-string
+        safe_text = truncated_text.replace('\\', '\\\\').replace('{', '{{').replace('}', '}}')
         
         return f"""Please analyze the following document text and extract structured product information suitable for an e-commerce product feed. 
 
@@ -85,7 +129,7 @@ If any information is not available in the text, use null for that field.
 Focus on extracting factual, specific information rather than marketing language.
 
 Document text:
-{truncated_text}"""
+{safe_text}"""
     
     def _create_simple_prompt(self, text_content: str) -> str:
         """Create a simple fallback prompt for basic product extraction.
@@ -118,6 +162,21 @@ Document text:
             console.print(f"[blue]🤖[/blue] Processing {Path(extracted_text.file_path).name} with BookWyrm API...")
             
             try:
+                # Validate prompt before sending
+                if not prompt or not prompt.strip():
+                    raise ValueError("Empty prompt generated")
+                
+                # Debug: Check prompt length and content
+                console.print(f"[blue]📝[/blue] Prompt length: {len(prompt)} chars for {Path(extracted_text.file_path).name}")
+                
+                # Test JSON serialization of the prompt
+                try:
+                    import json
+                    test_payload = {"content": prompt, "max_tokens": self.config.max_tokens}
+                    json.dumps(test_payload)  # This will fail if there are JSON issues
+                except (TypeError, ValueError) as json_error:
+                    raise ValueError(f"Prompt contains characters that break JSON serialization: {json_error}")
+                
                 for response in self.client.stream_summarize(
                     content=prompt,
                     max_tokens=self.config.max_tokens,
@@ -128,14 +187,50 @@ Document text:
                         break
             except Exception as api_error:
                 error_console.print(f"[red]BookWyrm API error for {Path(extracted_text.file_path).name}: {api_error}[/red]")
-                # Return fallback data structure
-                return {
-                    "id": Path(extracted_text.file_path).stem,
-                    "title": f"Product from {Path(extracted_text.file_path).name}",
-                    "description": f"Product information extracted from PDF document. API processing failed: {str(api_error)[:200]}",
-                    "source_file": extracted_text.file_path,
-                    "page_count": extracted_text.page_count
-                }
+                
+                # Try with a simpler prompt as fallback
+                console.print(f"[yellow]🔄[/yellow] Trying simple prompt for {Path(extracted_text.file_path).name}...")
+                try:
+                    simple_prompt = self._create_simple_prompt(extracted_text.text_content)
+                    for response in self.client.stream_summarize(
+                        content=simple_prompt,
+                        max_tokens=500,  # Use fewer tokens for simple prompt
+                        model_strength="swift"
+                    ):
+                        if isinstance(response, SummaryResponse):
+                            summary_response = response.summary
+                            break
+                    
+                    if summary_response:
+                        console.print(f"[green]✓[/green] Simple prompt worked for {Path(extracted_text.file_path).name}")
+                except Exception as simple_error:
+                    console.print(f"[red]Simple prompt also failed for {Path(extracted_text.file_path).name}: {simple_error}[/red]")
+                
+                # Debug: Save problematic content for inspection
+                debug_file = Path(f"debug_{Path(extracted_text.file_path).stem}_prompt.txt")
+                try:
+                    with open(debug_file, 'w', encoding='utf-8') as f:
+                        f.write(f"Error: {api_error}\n\n")
+                        f.write(f"Prompt length: {len(prompt)}\n\n")
+                        f.write(f"Original text length: {len(extracted_text.text_content)}\n\n")
+                        f.write("Prompt content:\n")
+                        f.write(prompt)
+                        f.write("\n\n" + "="*50 + "\n")
+                        f.write("Original text content (first 2000 chars):\n")
+                        f.write(extracted_text.text_content[:2000])
+                    console.print(f"[yellow]Debug info saved to {debug_file}[/yellow]")
+                except Exception:
+                    pass  # Don't fail if we can't write debug file
+                
+                # If we still don't have a response, return fallback data structure
+                if not summary_response:
+                    return {
+                        "id": Path(extracted_text.file_path).stem,
+                        "title": f"Product from {Path(extracted_text.file_path).name}",
+                        "description": f"Product information extracted from PDF document. API processing failed: {str(api_error)[:200]}",
+                        "source_file": extracted_text.file_path,
+                        "page_count": extracted_text.page_count
+                    }
             
             if not summary_response:
                 raise ValueError("No summary response received from BookWyrm API")
