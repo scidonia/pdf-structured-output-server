@@ -371,9 +371,25 @@ class ProductFeedGenerator:
                 # If we can't get model fields, we'll just use the data as-is
                 pass
             
+            # Handle MultiProductExtractionModel case - flatten products list for CSV
+            flattened_items = []
+            for item in product_items:
+                if "products" in item and isinstance(item["products"], list):
+                    # This is from MultiProductExtractionModel - extract each product
+                    for product in item["products"]:
+                        # Add source file metadata to each product
+                        if "source_file" in item:
+                            product["source_file"] = item["source_file"]
+                        if "page_count" in item:
+                            product["page_count"] = item["page_count"]
+                        flattened_items.append(product)
+                else:
+                    # Regular single product item
+                    flattened_items.append(item)
+            
             # Convert to list of dictionaries using reflection
             data = []
-            for item in product_items:
+            for item in flattened_items:
                 # Use reflection to iterate over attributes and their types
                 item_dict = {}
                 for field_name, field_value in item.items():
@@ -399,10 +415,46 @@ class ProductFeedGenerator:
             df = pd.DataFrame(data)
             df.to_csv(output_path, index=False)
             
-            console.print(f"[green]✓ Saved {len(product_items)} products to {output_path}[/green]")
+            console.print(f"[green]✓ Saved {len(data)} products to {output_path}[/green]")
             
         except Exception as e:
             error_console.print(f"[red]Error saving CSV: {e}[/red]")
+            raise
+    
+    def save_to_json(self, product_items: List[Dict[str, Any]], output_path: Path) -> None:
+        """Save product feed items to JSON file.
+        
+        Args:
+            product_items: List of product data dictionaries
+            output_path: Path for output JSON file
+        """
+        try:
+            import json
+            
+            # Handle MultiProductExtractionModel case - flatten products list
+            flattened_items = []
+            for item in product_items:
+                if "products" in item and isinstance(item["products"], list):
+                    # This is from MultiProductExtractionModel - extract each product
+                    for product in item["products"]:
+                        # Add source file metadata to each product
+                        if "source_file" in item:
+                            product["source_file"] = item["source_file"]
+                        if "page_count" in item:
+                            product["page_count"] = item["page_count"]
+                        flattened_items.append(product)
+                else:
+                    # Regular single product item
+                    flattened_items.append(item)
+            
+            # Save as JSON with proper formatting
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(flattened_items, f, indent=2, ensure_ascii=False, default=str)
+            
+            console.print(f"[green]✓ Saved {len(flattened_items)} products to {output_path}[/green]")
+            
+        except Exception as e:
+            error_console.print(f"[red]Error saving JSON: {e}[/red]")
             raise
     
     def validate_csv(self, csv_path: Path) -> ValidationResult:

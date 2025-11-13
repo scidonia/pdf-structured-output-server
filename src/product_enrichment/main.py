@@ -27,7 +27,12 @@ def process(
     output_file: Path = typer.Option(
         "product_feed.csv",
         "--output", "-o",
-        help="Output CSV file path"
+        help="Output file path"
+    ),
+    output_format: str = typer.Option(
+        "csv",
+        "--format", "-f",
+        help="Output format: 'csv' or 'json'"
     ),
     api_key: Optional[str] = typer.Option(
         None,
@@ -51,17 +56,24 @@ def process(
         help="Name of the Pydantic model class to use for extraction (must be defined in models/models.py)"
     ),
 ) -> None:
-    """Process PDF documents and generate a product feed CSV file.
+    """Process PDF documents and generate a product feed file.
     
     This command will:
     1. Extract PDF structure and text using BookWyrm API
     2. Convert text to phrasal format using BookWyrm API
     3. Generate structured product data using BookWyrm API with Pydantic models
-    4. Output results to a CSV file based on OpenAI commerce feed spec
+    4. Output results to CSV or JSON file based on OpenAI commerce feed spec
     """
     if not api_key:
         error_console.print("[red]Error: BookWyrm API key is required. Set BOOKWYRM_API_KEY environment variable or use --api-key option.[/red]")
         raise typer.Exit(1)
+    
+    # Validate output format
+    if output_format.lower() not in ["csv", "json"]:
+        error_console.print("[red]Error: Output format must be 'csv' or 'json'[/red]")
+        raise typer.Exit(1)
+    
+    output_format = output_format.lower()
     
     # Find all PDF files
     pdf_files = list(docs_dir.glob("*.pdf"))
@@ -96,9 +108,13 @@ def process(
         process_task = progress.add_task("Processing PDFs with BookWyrm API...", total=len(pdf_files))
         product_data = generator.generate_product_feed(pdf_files, progress, process_task)
         
-        # Save to CSV
-        save_task = progress.add_task("Saving to CSV...", total=1)
-        generator.save_to_csv(product_data, output_file)
+        # Save to file
+        if output_format == "csv":
+            save_task = progress.add_task("Saving to CSV...", total=1)
+            generator.save_to_csv(product_data, output_file)
+        else:  # json
+            save_task = progress.add_task("Saving to JSON...", total=1)
+            generator.save_to_json(product_data, output_file)
         progress.update(save_task, advance=1)
     
     console.print(f"[green]✓ Successfully processed {len(pdf_files)} PDFs and saved results to {output_file}[/green]")
