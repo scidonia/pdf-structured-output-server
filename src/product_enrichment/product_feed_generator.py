@@ -234,13 +234,29 @@ class ProductFeedGenerator:
             Extracted data as dictionary
         """
         try:
-            # Use BookWyrm's summarization with JSON schema
-            # Note: This assumes BookWyrm API supports json_schema parameter
-            # If not, we'll need to create a temporary dynamic model
+            # Create a dynamic Pydantic model from the JSON schema
+            from pydantic import create_model
+            from typing import Optional, List, Dict, Any
+            
+            # Extract properties from JSON schema
+            properties = schema_dict.get('properties', {})
+            
+            if not properties:
+                raise ValueError(f"No properties found in schema: {schema_dict}")
+            
+            # Convert JSON schema properties to Pydantic field definitions
+            field_definitions = {}
+            for field_name, field_schema in properties.items():
+                field_type = self._json_type_to_python_type(field_schema)
+                field_definitions[field_name] = (field_type, None)  # (type, default)
+            
+            # Create dynamic model
+            dynamic_model = create_model(schema_name, **field_definitions)
+            
+            # Use BookWyrm's summarization with the dynamic model
             stream = self.client.stream_summarize(
                 phrases=phrases,
-                json_schema=schema_dict,
-                model_name=schema_name,
+                summary_class=dynamic_model,
                 model_strength="wise",
                 debug=False
             )
@@ -268,6 +284,30 @@ class ProductFeedGenerator:
         except Exception as e:
             logger.error(f"Error in schema-based extraction: {e}")
             raise
+    
+    def _json_type_to_python_type(self, field_schema: Dict[str, Any]):
+        """Convert JSON schema type to Python type.
+        
+        Args:
+            field_schema: JSON schema field definition
+            
+        Returns:
+            Python type for Pydantic field
+        """
+        from typing import Optional, List, Dict, Any
+        
+        json_type = field_schema.get('type', 'string')
+        
+        type_mapping = {
+            'string': Optional[str],
+            'integer': Optional[int],
+            'number': Optional[float],
+            'boolean': Optional[bool],
+            'array': Optional[List[str]],  # Simplified - assume string arrays
+            'object': Optional[Dict[str, Any]]
+        }
+        
+        return type_mapping.get(json_type, Optional[str])
     
     def _convert_to_product_feed_item(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
         """Convert extracted product data to dictionary for CSV output.
