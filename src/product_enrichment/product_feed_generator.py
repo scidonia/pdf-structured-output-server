@@ -15,11 +15,7 @@ from rich.progress import Progress
 
 from .models import (
     ProcessingConfig, 
-    ProductFeedItem, 
-    ValidationResult,
-    EnableSearchEnum,
-    EnableCheckoutEnum,
-    AvailabilityEnum
+    ValidationResult
 )
 
 # Import user-configurable product model
@@ -205,63 +201,25 @@ class ProductFeedGenerator:
                 "weight": None
             }
     
-    def _convert_to_product_feed_item(self, product_data: Dict[str, Any]) -> ProductFeedItem:
-        """Convert extracted product data to ProductFeedItem model.
+    def _convert_to_product_feed_item(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert extracted product data to dictionary for CSV output.
         
         Args:
             product_data: Raw product data from API (structure matches user's Pydantic model)
             
         Returns:
-            Validated ProductFeedItem instance
+            Dictionary containing the complete product data
         """
         # The API returns data that matches the user's Pydantic model JSON schema
-        # We trust this structure and create the ProductFeedItem directly
-        try:
-            feed_item = ProductFeedItem(**product_data)
-            return feed_item
-        except Exception as e:
-            # If direct creation fails, it means the user model doesn't match ProductFeedItem
-            # This is expected - we need to map from user model to ProductFeedItem
-            error_console.print(f"[yellow]Warning: User model structure doesn't match ProductFeedItem, using field mapping: {e}[/yellow]")
-            
-            # Map common fields from user model to ProductFeedItem
-            mapped_data = {
-                # Required fields with fallbacks
-                "enable_search": "true",
-                "enable_checkout": "false",
-                "id": str(product_data.get("id", "UNKNOWN")),
-                "title": str(product_data.get("title", "Unknown Product"))[:150],
-                "description": str(product_data.get("description", "No description available"))[:5000],
-                "link": f"https://example.com/product/{product_data.get('id', 'unknown')}",
-                "price": str(product_data.get("price", "0.00 USD")),
-                "availability": "in_stock",
-                "inventory_quantity": 1,
-                "seller_name": "Example Store",
-                "seller_url": "https://example.com/store",
-                "return_policy": "https://example.com/returns",
-                "return_window": 30,
-            }
-            
-            # Map optional fields that might exist in user model
-            optional_mappings = {
-                "brand": "brand",
-                "product_category": "product_category", 
-                "material": "material",
-                "weight": "weight"
-            }
-            
-            for feed_field, user_field in optional_mappings.items():
-                if user_field in product_data and product_data[user_field] is not None:
-                    mapped_data[feed_field] = str(product_data[user_field])
-            
-            return ProductFeedItem(**mapped_data)
+        # We have a complete object already, so we just return it as-is
+        return product_data
     
     def generate_product_feed(
         self, 
         pdf_paths: List[Path], 
         progress: Optional[Progress] = None, 
         task_id: Optional[int] = None
-    ) -> List[ProductFeedItem]:
+    ) -> List[Dict[str, Any]]:
         """Generate product feed items from PDF files using complete BookWyrm workflow.
         
         Args:
@@ -270,7 +228,7 @@ class ProductFeedGenerator:
             task_id: Optional task ID for progress updates
             
         Returns:
-            List of ProductFeedItem objects
+            List of product data dictionaries
         """
         product_items = []
         
@@ -308,23 +266,39 @@ class ProductFeedGenerator:
         console.print(f"[green]Successfully generated {len(product_items)} product feed items[/green]")
         return product_items
     
-    def save_to_csv(self, product_items: List[ProductFeedItem], output_path: Path) -> None:
-        """Save product feed items to CSV file.
+    def save_to_csv(self, product_items: List[Dict[str, Any]], output_path: Path) -> None:
+        """Save product feed items to CSV file using reflection.
         
         Args:
-            product_items: List of ProductFeedItem objects
+            product_items: List of product data dictionaries
             output_path: Path for output CSV file
         """
         try:
-            # Convert to list of dictionaries
+            # Use reflection to get all possible fields from the user's ProductExtractionModel
+            model_fields = {}
+            try:
+                model_fields = ProductExtractionModel.model_fields
+            except Exception:
+                # If we can't get model fields, we'll just use the data as-is
+                pass
+            
+            # Convert to list of dictionaries using reflection
             data = []
             for item in product_items:
-                # Convert Pydantic model to dict, handling enums and URLs
+                # Use reflection to iterate over attributes and their types
                 item_dict = {}
-                for field_name, field_value in item.model_dump().items():
+                for field_name, field_value in item.items():
                     if field_value is not None:
-                        # Convert HttpUrl objects to strings
-                        if hasattr(field_value, '__str__'):
+                        # Get field type from model if available
+                        field_type = None
+                        if model_fields and field_name in model_fields:
+                            field_type = model_fields[field_name].annotation
+                        
+                        # Convert based on type or use string representation
+                        if isinstance(field_value, (list, dict)):
+                            # Convert complex types to JSON strings
+                            item_dict[field_name] = json.dumps(field_value)
+                        elif hasattr(field_value, '__str__'):
                             item_dict[field_name] = str(field_value)
                         else:
                             item_dict[field_name] = field_value
