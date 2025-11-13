@@ -248,6 +248,9 @@ class ProductEnrichmentServer:
             # Extract properties from JSON schema
             properties = schema_dict.get('properties', {})
             
+            # Debug: Log the schema being used
+            logger.info(f"Creating dynamic model '{schema_name}' with {len(properties)} fields: {list(properties.keys())}")
+            
             # Convert JSON schema properties to Pydantic field definitions
             field_definitions = {}
             for field_name, field_schema in properties.items():
@@ -256,12 +259,15 @@ class ProductEnrichmentServer:
             
             # Create dynamic model
             dynamic_model = create_model(schema_name, **field_definitions)
+            logger.info(f"Successfully created dynamic model '{schema_name}' with fields: {list(field_definitions.keys())}")
             return dynamic_model
             
         except Exception as e:
             logger.error(f"Error creating dynamic model: {e}")
+            logger.error(f"Schema dict: {schema_dict}")
             # Fallback to basic model
             from models.models import ProductExtractionModel
+            logger.warning("Falling back to ProductExtractionModel")
             return ProductExtractionModel
     
     def _json_type_to_python_type(self, field_schema: Dict[str, Any]):
@@ -316,6 +322,7 @@ class ProductEnrichmentServer:
                 raise ValueError("No phrases generated from text")
             
             # Use structured summarization with dynamic model
+            logger.info(f"Using dynamic model: {dynamic_model.__name__} for PDF: {pdf_path.name}")
             stream = generator.client.stream_summarize(
                 phrases=phrases,
                 summary_class=dynamic_model,
