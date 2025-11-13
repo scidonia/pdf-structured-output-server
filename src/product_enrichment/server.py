@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 import tempfile
 import os
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Header
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, create_model
 from typing import Optional
@@ -56,27 +56,29 @@ class ProductEnrichmentServer:
         
         @self.app.post("/process")
         async def process_pdfs(
+            request: Request,
             files: List[UploadFile] = File(..., description="PDF files to process"),
             schema_name: str = Form(..., description="Name for the extraction schema"),
-            json_schema: str = Form(..., description="JSON schema for extraction"),
-            authorization: Optional[str] = Header(None, alias="authorization", description="Bearer token for BookWyrm API")
+            json_schema: str = Form(..., description="JSON schema for extraction")
         ):
             """Process PDF files and return streaming results.
             
             Args:
+                request: FastAPI Request object to access headers
                 files: List of PDF files
                 schema_name: Name for the extraction schema
                 json_schema: JSON schema definition as string
-                authorization: Authorization header with Bearer token
                 
             Returns:
                 Streaming SSE response with extraction results
             """
             try:
+                # Extract API key from Authorization header using request object
+                authorization = request.headers.get("authorization")
+                
                 # Debug: Log the received authorization header
                 logger.info(f"Received authorization header: {authorization}")
                 
-                # Extract API key from Authorization header
                 if not authorization:
                     raise HTTPException(status_code=401, detail="Authorization header is missing")
                 
