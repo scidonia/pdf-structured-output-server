@@ -8,6 +8,7 @@ import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from bookwyrm import BookWyrmClient
+from bookwyrm.models import SummaryResponse
 from rich.console import Console
 
 from .models import (
@@ -88,22 +89,29 @@ Document text:
             prompt = self._create_product_extraction_prompt(extracted_text.text_content)
             
             # Use BookWyrm API for summarization/extraction
-            response = self.client.summarize(
-                text=prompt,
+            summary_response = None
+            for response in self.client.stream_summarize(
+                content=prompt,
                 max_tokens=self.config.max_tokens,
-                temperature=0.1  # Low temperature for consistent extraction
-            )
+                model_strength="swift"  # Use swift for faster processing
+            ):
+                if isinstance(response, SummaryResponse):
+                    summary_response = response.summary
+                    break
+            
+            if not summary_response:
+                raise ValueError("No summary response received from BookWyrm API")
             
             # Try to parse JSON response
             try:
-                product_data = json.loads(response.summary)
+                product_data = json.loads(summary_response)
             except json.JSONDecodeError:
                 # If not valid JSON, create a basic structure
                 console.print(f"[yellow]Warning: Could not parse JSON from API response for {extracted_text.file_path}[/yellow]")
                 product_data = {
                     "id": Path(extracted_text.file_path).stem,
                     "title": f"Product from {Path(extracted_text.file_path).name}",
-                    "description": response.summary[:1000],  # Use first part of response
+                    "description": summary_response[:1000],  # Use first part of response
                     "brand": None,
                     "product_category": None,
                     "price": None,
