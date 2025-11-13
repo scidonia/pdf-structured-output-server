@@ -6,7 +6,6 @@ from pathlib import Path
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
-from .pdf_processor import PDFProcessor
 from .product_feed_generator import ProductFeedGenerator
 from .models import ProcessingConfig
 
@@ -49,10 +48,10 @@ def process(
     """Process PDF documents and generate a product feed CSV file.
     
     This command will:
-    1. Extract text from all PDF files in the specified directory
-    2. Use BookWyrm API to generate product summaries
-    3. Extract structured product data based on OpenAI commerce feed spec
-    4. Output results to a CSV file
+    1. Extract PDF structure and text using BookWyrm API
+    2. Convert text to phrasal format using BookWyrm API
+    3. Generate structured product data using BookWyrm API with Pydantic models
+    4. Output results to a CSV file based on OpenAI commerce feed spec
     """
     if not api_key:
         error_console.print("[red]Error: BookWyrm API key is required. Set BOOKWYRM_API_KEY environment variable or use --api-key option.[/red]")
@@ -72,7 +71,6 @@ def process(
         batch_size=batch_size
     )
     
-    processor = PDFProcessor(config)
     generator = ProductFeedGenerator(config)
     
     with Progress(
@@ -83,13 +81,9 @@ def process(
         TimeElapsedColumn(),
         console=console,
     ) as progress:
-        # Extract text from PDFs
-        extract_task = progress.add_task("Extracting text from PDFs...", total=len(pdf_files))
-        extracted_texts = processor.extract_texts_from_pdfs(pdf_files, progress, extract_task)
-        
-        # Generate summaries and product data
-        process_task = progress.add_task("Processing with BookWyrm API...", total=len(extracted_texts))
-        product_data = generator.generate_product_feed(extracted_texts, progress, process_task)
+        # Process PDFs directly with BookWyrm API (PDF extraction + text processing + summarization)
+        process_task = progress.add_task("Processing PDFs with BookWyrm API...", total=len(pdf_files))
+        product_data = generator.generate_product_feed(pdf_files, progress, process_task)
         
         # Save to CSV
         save_task = progress.add_task("Saving to CSV...", total=1)

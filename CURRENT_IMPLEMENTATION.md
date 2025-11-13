@@ -1,44 +1,63 @@
 # Current BookWyrm API Implementation Analysis
 
-## What We Have Implemented
+## What We Have Implemented (CORRECTED)
 
 ### Current Workflow
-1. **PDF Text Extraction** - Using `PDFProcessor` to extract raw text from PDFs
-2. **Text Cleaning** - Cleaning extracted text for JSON safety
-3. **Prompt Creation** - Creating text prompts asking for product information
-4. **BookWyrm API Call** - Using `client.stream_summarize()` with text prompts
-5. **Response Parsing** - Attempting to parse JSON from summary responses
+1. **PDF Structure Extraction** - Using BookWyrm `client.stream_extract_pdf()` with PDF bytes
+2. **Text Mapping Creation** - Converting PDF pages to raw text using BookWyrm utilities
+3. **Phrasal Processing** - Using BookWyrm `client.stream_process_text()` to convert raw text to phrases
+4. **Structured Summarization** - Using BookWyrm `client.stream_summarize()` with phrases and Pydantic model
+5. **Product Feed Generation** - Converting structured data to OpenAI commerce feed format
 
-### Current Issues
-- ❌ **Wrong API Usage**: Using `stream_summarize()` with raw text and prompts
-- ❌ **No Phrasal Processing**: Skipping the required phrasal text step
-- ❌ **Manual Prompting**: Creating custom prompts instead of using Pydantic models
-- ❌ **Wrong Endpoint**: Using `/summarize/sse` instead of appropriate endpoints
+### What's Actually Submitted to BookWyrm
 
-## What Needs to Change
+#### Step 1: PDF Extraction
+```python
+# _extract_pdf_with_bookwyrm()
+stream = self.client.stream_extract_pdf(
+    pdf_bytes=pdf_bytes,           # PDF file as bytes
+    filename=pdf_path.name,        # Original filename
+    start_page=1,                  # Start from page 1
+    num_pages=None                 # Extract all pages
+)
+```
+**Submitted**: PDF file bytes to `/extract_pdf` endpoint
 
-### Required Changes
-1. **Add Phrasal Processing Step**
-   - Use `client.stream_process_text()` to convert raw text to phrases
-   - Save phrases as JSONL format
+#### Step 2: Text to Phrases
+```python
+# _process_text_to_phrases()
+stream = self.client.stream_process_text(
+    text=text_content,             # Raw text from PDF extraction
+    chunk_size=1000,               # Chunk size for processing
+    response_format="WITH_OFFSETS" # Include character offsets
+)
+```
+**Submitted**: Raw text string to `/process_text` endpoint
 
-2. **Create Product Extraction Pydantic Model**
-   - Define a Pydantic model for the desired product structure
-   - Remove manual prompt creation
+#### Step 3: Structured Extraction
+```python
+# _extract_product_data_from_pdf()
+stream = self.client.stream_summarize(
+    phrases=phrases,                    # List of TextResult objects
+    summary_class=ProductExtractionModel, # Pydantic model for structure
+    model_strength="swift",             # Model quality setting
+    debug=False                         # Debug mode off
+)
+```
+**Submitted**: 
+- Phrasal text objects to `/summarize/sse` endpoint
+- ProductExtractionModel converted to JSON schema
+- No manual prompts
 
-3. **Use Correct API Method**
-   - Use `client.stream_summarize()` with phrases and Pydantic model
-   - Remove custom prompting
+### Current Implementation Status
+- ✅ **Correct PDF Processing**: Using BookWyrm PDF extraction API
+- ✅ **Proper Phrasal Processing**: Converting text to phrases via BookWyrm
+- ✅ **Structured Data Extraction**: Using Pydantic models instead of prompts
+- ✅ **No Manual Prompting**: Letting BookWyrm handle extraction based on schema
+- ✅ **Complete BookWyrm Workflow**: PDF → Text → Phrases → Structured Data
 
-4. **Update Workflow**
-   - Raw Text → Phrasal Processing → Structured Summarization → Product Data
-
-### New Workflow Should Be
-1. **PDF Text Extraction** (keep current)
-2. **Phrasal Text Processing** (NEW - convert raw text to phrases)
-3. **Structured Summarization** (CHANGE - use phrases + Pydantic model)
-4. **Product Feed Generation** (keep current conversion logic)
-
-### Files That Need Changes
-- `src/product_enrichment/models.py` - Add product extraction Pydantic model
-- `src/product_enrichment/product_feed_generator.py` - Complete rewrite of API usage
+### Files Updated
+- ✅ `src/product_enrichment/models.py` - Added ProductExtractionModel
+- ✅ `src/product_enrichment/product_feed_generator.py` - Complete BookWyrm workflow
+- ✅ `src/product_enrichment/main.py` - Updated to use PDF-first approach
+- ✅ Removed dependency on local PDFProcessor
