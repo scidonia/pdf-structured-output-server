@@ -87,6 +87,20 @@ Focus on extracting factual, specific information rather than marketing language
 Document text:
 {truncated_text}"""
     
+    def _create_simple_prompt(self, text_content: str) -> str:
+        """Create a simple fallback prompt for basic product extraction.
+        
+        Args:
+            text_content: The extracted text from PDF
+            
+        Returns:
+            Simple prompt for the BookWyrm API
+        """
+        # Use only the first 1000 characters and clean them thoroughly
+        cleaned_text = self._clean_text_for_json(text_content)[:1000]
+        
+        return f"Extract the product name, brand, and brief description from this text: {cleaned_text}"
+
     def _extract_product_data_from_text(self, extracted_text: ExtractedText) -> Dict[str, Any]:
         """Extract structured product data from text using BookWyrm API.
         
