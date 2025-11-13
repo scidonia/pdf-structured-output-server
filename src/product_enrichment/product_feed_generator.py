@@ -58,7 +58,6 @@ class ProductFeedGenerator:
             # Use BookWyrm's text processing to create phrases
             stream = self.client.stream_process_text(
                 text=text_content,
-                chunk_size=1000,  # Reasonable chunk size for product documents
                 response_format="WITH_OFFSETS"  # Include character offsets
             )
             
