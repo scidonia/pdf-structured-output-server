@@ -70,6 +70,43 @@ This will check for:
 - Data type validation
 - Business rule compliance
 
+### Server API
+
+Start the server for API-based processing:
+
+```bash
+product-enrichment serve --host 0.0.0.0 --port 8000
+```
+
+#### Process PDFs via API
+
+Use curl to process PDF brochures and extract product information:
+
+```bash
+curl -X POST "http://localhost:8000/process" \
+  -H "Authorization: Bearer $BOOKWYRM_API_KEY" \
+  -F "files=@docs/WAN28259GB.pdf" \
+  -F "files=@docs/WGB256A2GB.pdf" \
+  -F "schema_name=ProductSummary" \
+  -F 'json_schema={"type":"object","properties":{"title":{"type":"string","description":"Product name or title as mentioned in the document"},"price":{"type":"number","description":"Product price as a numeric value (without currency symbol)"},"dimensions":{"type":"string","description":"Product dimensions with units (e.g. 845x598x590 mm)"}},"required":["title"]}'
+```
+
+This example:
+- Uploads multiple PDF product brochures (`WAN28259GB.pdf`, `WGB256A2GB.pdf`)
+- Uses a custom schema named "ProductSummary" 
+- Extracts title, price, and dimensions from each document
+- Returns streaming JSON responses with extracted product data
+
+The API returns a streaming response where each line contains JSON data for a processed PDF.
+
+#### Health Check
+
+Check if the server is running:
+
+```bash
+curl http://localhost:8000/health
+```
+
 ## Output Format
 
 The generated CSV includes fields from the OpenAI commerce feed specification:
