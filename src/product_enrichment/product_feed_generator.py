@@ -8,7 +8,8 @@ import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from bookwyrm import BookWyrmClient
-from bookwyrm.models import SummaryResponse
+from bookwyrm.models import SummaryResponse, TextResult, TextSpanResult
+from bookwyrm.utils import collect_phrases_from_stream, collect_summary_from_stream
 from rich.console import Console
 from rich.progress import Progress
 
@@ -19,7 +20,8 @@ from .models import (
     ValidationResult,
     EnableSearchEnum,
     EnableCheckoutEnum,
-    AvailabilityEnum
+    AvailabilityEnum,
+    ProductExtractionModel
 )
 
 logger = logging.getLogger(__name__)
@@ -40,100 +42,38 @@ class ProductFeedGenerator:
         if config.api_key != "dummy":  # Allow dummy key for validation-only usage
             self.client = BookWyrmClient(api_key=config.api_key)
     
-    def _clean_text_for_json(self, text: str) -> str:
-        """Clean text content to ensure it's safe for JSON serialization.
+    def _process_text_to_phrases(self, text_content: str, file_path: str) -> List[TextResult]:
+        """Convert raw text to phrasal format using BookWyrm API.
         
         Args:
-            text: Raw text content
+            text_content: Raw text extracted from PDF
+            file_path: Source file path for debugging
             
         Returns:
-            Cleaned text safe for JSON
+            List of phrasal text results
         """
-        import re
-        
-        if not text or not text.strip():
-            return "No text content available"
-        
-        # Remove null bytes and other problematic characters
-        cleaned = text.replace('\x00', '')
-        
-        # Replace various types of quotes and special characters that can break JSON
-        cleaned = cleaned.replace('\u201c', '"').replace('\u201d', '"')  # Smart quotes
-        cleaned = cleaned.replace('\u2018', "'").replace('\u2019', "'")  # Smart apostrophes
-        cleaned = cleaned.replace('\u2013', '-').replace('\u2014', '-')  # En/em dashes
-        cleaned = cleaned.replace('\u00a0', ' ')  # Non-breaking space
-        
-        # Remove or replace other problematic Unicode characters
-        cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', cleaned)
-        
-        # Remove characters that can break JSON strings
-        cleaned = cleaned.replace('\\', '\\\\')  # Escape backslashes
-        cleaned = cleaned.replace('"', '\\"')    # Escape quotes
-        cleaned = cleaned.replace('\b', '\\b')   # Escape backspace
-        cleaned = cleaned.replace('\f', '\\f')   # Escape form feed
-        cleaned = cleaned.replace('\n', '\\n')   # Escape newlines
-        cleaned = cleaned.replace('\r', '\\r')   # Escape carriage returns
-        cleaned = cleaned.replace('\t', '\\t')   # Escape tabs
-        
-        # Remove excessive whitespace (after escaping)
-        cleaned = re.sub(r'\\n\\s*\\n\\s*\\n', '\\n\\n', cleaned)  # Multiple blank lines
-        cleaned = re.sub(r'[ ]+', ' ', cleaned)  # Multiple spaces
-        
-        # Ensure we have some content
-        cleaned = cleaned.strip()
-        if not cleaned:
-            return "No readable text content found in document"
+        try:
+            console.print(f"[blue]📝[/blue] Converting text to phrases for {Path(file_path).name}...")
             
-        return cleaned
-
-    def _create_product_extraction_prompt(self, text_content: str) -> str:
-        """Create a prompt for extracting product information from text.
-        
-        Args:
-            text_content: The extracted text from PDF
+            # Use BookWyrm's text processing to create phrases
+            stream = self.client.stream_process_text(
+                text=text_content,
+                chunk_size=1000,  # Reasonable chunk size for product documents
+                response_format="WITH_OFFSETS"  # Include character offsets
+            )
             
-        Returns:
-            Formatted prompt for the BookWyrm API
-        """
-        # Clean text content thoroughly for JSON safety
-        cleaned_text = self._clean_text_for_json(text_content)
-        
-        # Truncate to avoid token limits and ensure we don't break mid-word
-        truncated_text = cleaned_text[:2000]  # Reduced size for safety
-        if len(cleaned_text) > 2000:
-            # Find the last complete sentence or line break
-            last_period = truncated_text.rfind('.')
-            last_newline = truncated_text.rfind('\n')
-            cutoff = max(last_period, last_newline)
-            if cutoff > 1500:  # Only use if it's not too short
-                truncated_text = truncated_text[:cutoff + 1]
-        
-        # Create a simple, safe prompt without complex formatting
-        prompt = (
-            "Please analyze the following document text and extract product information. "
-            "Provide a JSON response with these fields: id, title, description, brand, "
-            "product_category, price, material, weight. Use null for missing information.\n\n"
-            "Document text:\n" + truncated_text
-        )
-        
-        return prompt
-    
-    def _create_simple_prompt(self, text_content: str) -> str:
-        """Create a simple fallback prompt for basic product extraction.
-        
-        Args:
-            text_content: The extracted text from PDF
+            # Collect phrases using BookWyrm utility
+            phrases = collect_phrases_from_stream(stream, verbose=False)
             
-        Returns:
-            Simple prompt for the BookWyrm API
-        """
-        # Use only the first 500 characters and clean them thoroughly
-        cleaned_text = self._clean_text_for_json(text_content)[:500]
-        
-        return "Extract the product name, brand, and brief description from this text: " + cleaned_text
+            console.print(f"[green]✓[/green] Created {len(phrases)} phrases from {Path(file_path).name}")
+            return phrases
+            
+        except Exception as e:
+            error_console.print(f"[red]Error processing text to phrases for {file_path}: {e}[/red]")
+            raise
 
     def _extract_product_data_from_text(self, extracted_text: ExtractedText) -> Dict[str, Any]:
-        """Extract structured product data from text using BookWyrm API.
+        """Extract structured product data from text using proper BookWyrm workflow.
         
         Args:
             extracted_text: Extracted text from PDF
@@ -142,123 +82,62 @@ class ProductFeedGenerator:
             Dictionary containing extracted product information
         """
         try:
-            prompt = self._create_product_extraction_prompt(extracted_text.text_content)
-                
-            # Use BookWyrm API for summarization/extraction
-            summary_response = None
             console.print(f"[blue]🤖[/blue] Processing {Path(extracted_text.file_path).name} with BookWyrm API...")
-                
-            try:
-                # Validate prompt before sending
-                if not prompt or not prompt.strip():
-                    raise ValueError("Empty prompt generated")
-                    
-                # Debug: Check prompt length and content
-                console.print(f"[blue]📝[/blue] Prompt length: {len(prompt)} chars for {Path(extracted_text.file_path).name}")
-                
-                # Debug: Show what we're actually sending to the API
-                console.print(f"[yellow]🔍 DEBUG: First 200 chars of prompt:[/yellow]")
-                console.print(f"[dim]{prompt[:200]}...[/dim]")
-                
-                # Debug: Show the actual API call parameters
-                api_params = {
-                    "content": prompt,
-                    "max_tokens": self.config.max_tokens,
-                    "model_strength": "swift"
-                }
-                console.print(f"[yellow]🔍 DEBUG: API parameters:[/yellow]")
-                console.print(f"[dim]max_tokens: {api_params['max_tokens']}, model_strength: {api_params['model_strength']}[/dim]")
-                
-                # Debug: Save the full prompt to a file for inspection
-                debug_file = Path(f"debug_prompt_{Path(extracted_text.file_path).stem}.txt")
-                try:
-                    with open(debug_file, 'w', encoding='utf-8') as f:
-                        f.write("=== PROMPT BEING SENT TO BOOKWYRM API ===\n\n")
-                        f.write(prompt)
-                        f.write("\n\n=== END PROMPT ===\n")
-                        f.write(f"\nPrompt length: {len(prompt)} characters\n")
-                        f.write(f"Max tokens: {self.config.max_tokens}\n")
-                        f.write(f"Model strength: swift\n")
-                    console.print(f"[yellow]🔍 DEBUG: Full prompt saved to {debug_file}[/yellow]")
-                except Exception as debug_error:
-                    console.print(f"[yellow]Warning: Could not save debug file: {debug_error}[/yellow]")
-                    
-                # Use the BookWyrm client's stream_summarize method correctly
-                # According to the docs, we should pass content as a string
-                for response in self.client.stream_summarize(
-                    content=prompt,
-                    max_tokens=self.config.max_tokens,
-                    model_strength="swift"  # Use swift for faster processing
-                ):
-                    if isinstance(response, SummaryResponse):
-                        summary_response = response.summary
-                        break
-            except Exception as api_error:
-                error_console.print(f"[red]BookWyrm API error for {Path(extracted_text.file_path).name}: {api_error}[/red]")
-                    
-                # Try with a simpler prompt as fallback
-                console.print(f"[yellow]🔄[/yellow] Trying simple prompt for {Path(extracted_text.file_path).name}...")
-                try:
-                    simple_prompt = self._create_simple_prompt(extracted_text.text_content)
-                    for response in self.client.stream_summarize(
-                        content=simple_prompt,
-                        max_tokens=500,  # Use fewer tokens for simple prompt
-                        model_strength="swift"
-                    ):
-                        if isinstance(response, SummaryResponse):
-                            summary_response = response.summary
-                            break
-                        
-                    if summary_response:
-                        console.print(f"[green]✓[/green] Simple prompt worked for {Path(extracted_text.file_path).name}")
-                except Exception as simple_error:
-                    console.print(f"[red]Simple prompt also failed for {Path(extracted_text.file_path).name}: {simple_error}[/red]")
-                    
-                # If we still don't have a response, return fallback data structure
-                if not summary_response:
-                    return {
-                        "id": Path(extracted_text.file_path).stem,
-                        "title": f"Product from {Path(extracted_text.file_path).name}",
-                        "description": f"Product information extracted from PDF document. API processing failed: {str(api_error)[:200]}",
-                        "source_file": extracted_text.file_path,
-                        "page_count": extracted_text.page_count
-                    }
             
-            if not summary_response:
-                raise ValueError("No summary response received from BookWyrm API")
+            # Step 1: Convert raw text to phrasal format
+            phrases = self._process_text_to_phrases(
+                extracted_text.text_content, 
+                extracted_text.file_path
+            )
             
-            # Try to parse JSON response
-            try:
-                product_data = json.loads(summary_response)
-            except json.JSONDecodeError:
-                # If not valid JSON, create a basic structure
-                console.print(f"[yellow]Warning: Could not parse JSON from API response for {extracted_text.file_path}[/yellow]")
-                product_data = {
-                    "id": Path(extracted_text.file_path).stem,
-                    "title": f"Product from {Path(extracted_text.file_path).name}",
-                    "description": summary_response[:1000],  # Use first part of response
-                    "brand": None,
-                    "product_category": None,
-                    "price": None,
-                    "material": None,
-                    "weight": None
-                }
+            if not phrases:
+                raise ValueError("No phrases generated from text")
+            
+            # Step 2: Use structured summarization with Pydantic model
+            console.print(f"[blue]📊[/blue] Extracting structured product data from {len(phrases)} phrases...")
+            
+            stream = self.client.stream_summarize(
+                phrases=phrases,
+                summary_class=ProductExtractionModel,
+                model_strength="swift",
+                debug=False
+            )
+            
+            # Collect the structured summary
+            final_result = collect_summary_from_stream(stream, verbose=False)
+            
+            if not final_result or not final_result.summary:
+                raise ValueError("No structured summary received from BookWyrm API")
+            
+            # Convert the Pydantic model result to dictionary
+            if isinstance(final_result.summary, ProductExtractionModel):
+                product_data = final_result.summary.model_dump()
+            elif isinstance(final_result.summary, dict):
+                product_data = final_result.summary
+            else:
+                raise ValueError(f"Unexpected summary type: {type(final_result.summary)}")
             
             # Add metadata
             product_data["source_file"] = extracted_text.file_path
             product_data["page_count"] = extracted_text.page_count
             
+            console.print(f"[green]✓[/green] Successfully extracted product data for {Path(extracted_text.file_path).name}")
             return product_data
             
         except Exception as e:
             error_console.print(f"[red]Error extracting product data from {extracted_text.file_path}: {e}[/red]")
-            # Return minimal data structure
+            # Return minimal fallback data structure
             return {
                 "id": Path(extracted_text.file_path).stem,
                 "title": f"Product from {Path(extracted_text.file_path).name}",
-                "description": "Product information extracted from PDF document",
+                "description": f"Product information extracted from PDF document. Processing failed: {str(e)[:200]}",
                 "source_file": extracted_text.file_path,
-                "page_count": extracted_text.page_count
+                "page_count": extracted_text.page_count,
+                "brand": None,
+                "product_category": None,
+                "price": None,
+                "material": None,
+                "weight": None
             }
     
     def _convert_to_product_feed_item(self, product_data: Dict[str, Any]) -> ProductFeedItem:
