@@ -155,39 +155,55 @@ class ProductFeedGenerator:
             elif isinstance(final_result.summary, dict):
                 product_data = final_result.summary
             elif isinstance(final_result.summary, str):
-                # Handle case where API returns a string instead of structured data
-                console.print(f"[yellow]Warning: Received string response instead of structured data for {pdf_path.name}[/yellow]")
-                console.print(f"[yellow]String response content:[/yellow]")
-                console.print(f"[dim]{final_result.summary[:500]}{'...' if len(final_result.summary) > 500 else ''}[/dim]")
-                
-                # Save full string response to debug file
-                debug_file = Path(f"debug_string_response_{pdf_path.stem}.txt")
+                # Handle case where API returns JSON as a string - parse it
                 try:
-                    with open(debug_file, 'w', encoding='utf-8') as f:
-                        f.write(f"=== STRING RESPONSE FROM BOOKWYRM API ===\n")
-                        f.write(f"File: {pdf_path.name}\n")
-                        f.write(f"Response length: {len(final_result.summary)} characters\n\n")
-                        f.write(final_result.summary)
-                    console.print(f"[yellow]Full string response saved to {debug_file}[/yellow]")
-                except Exception as debug_error:
-                    console.print(f"[yellow]Warning: Could not save debug file: {debug_error}[/yellow]")
-                
-                # Create minimal fallback using model fields if available
-                fallback_data = {
-                    "id": pdf_path.stem,
-                    "title": f"Product from {pdf_path.name}",
-                    "description": final_result.summary[:1000] if final_result.summary else "No description available"
-                }
-                # Add None values for any other fields defined in the model
-                try:
-                    model_fields = ProductExtractionModel.model_fields
-                    for field_name in model_fields:
-                        if field_name not in fallback_data:
-                            fallback_data[field_name] = None
-                except Exception:
-                    # If we can't inspect the model, just use basic fallback
-                    pass
-                product_data = fallback_data
+                    # Try to parse as JSON first
+                    json_data = json.loads(final_result.summary)
+                    
+                    # Create the user's model from the parsed JSON
+                    model_instance = ProductExtractionModel(**json_data)
+                    product_data = model_instance.model_dump()
+                    
+                except json.JSONDecodeError as json_error:
+                    # If it's not valid JSON, treat as plain text
+                    console.print(f"[yellow]Warning: Received non-JSON string response for {pdf_path.name}[/yellow]")
+                    console.print(f"[yellow]String response content:[/yellow]")
+                    console.print(f"[dim]{final_result.summary[:500]}{'...' if len(final_result.summary) > 500 else ''}[/dim]")
+                    
+                    # Save full string response to debug file
+                    debug_file = Path(f"debug_string_response_{pdf_path.stem}.txt")
+                    try:
+                        with open(debug_file, 'w', encoding='utf-8') as f:
+                            f.write(f"=== NON-JSON STRING RESPONSE FROM BOOKWYRM API ===\n")
+                            f.write(f"File: {pdf_path.name}\n")
+                            f.write(f"JSON Parse Error: {json_error}\n")
+                            f.write(f"Response length: {len(final_result.summary)} characters\n\n")
+                            f.write(final_result.summary)
+                        console.print(f"[yellow]Full string response saved to {debug_file}[/yellow]")
+                    except Exception as debug_error:
+                        console.print(f"[yellow]Warning: Could not save debug file: {debug_error}[/yellow]")
+                    
+                    # Create minimal fallback using model fields if available
+                    fallback_data = {
+                        "id": pdf_path.stem,
+                        "title": f"Product from {pdf_path.name}",
+                        "description": final_result.summary[:1000] if final_result.summary else "No description available"
+                    }
+                    # Add None values for any other fields defined in the model
+                    try:
+                        model_fields = ProductExtractionModel.model_fields
+                        for field_name in model_fields:
+                            if field_name not in fallback_data:
+                                fallback_data[field_name] = None
+                    except Exception:
+                        # If we can't inspect the model, just use basic fallback
+                        pass
+                    product_data = fallback_data
+                    
+                except Exception as model_error:
+                    # If model creation fails, log the error but use the JSON data directly
+                    console.print(f"[yellow]Warning: Could not create model instance for {pdf_path.name}: {model_error}[/yellow]")
+                    product_data = json_data
             else:
                 raise ValueError(f"Unexpected summary type: {type(final_result.summary)}")
             
