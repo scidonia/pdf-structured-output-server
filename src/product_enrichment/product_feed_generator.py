@@ -209,55 +209,52 @@ class ProductFeedGenerator:
         """Convert extracted product data to ProductFeedItem model.
         
         Args:
-            product_data: Raw product data from API (structure determined by user model)
+            product_data: Raw product data from API (structure matches user's Pydantic model)
             
         Returns:
             Validated ProductFeedItem instance
         """
-        # Generate required fields with defaults
-        product_id = str(product_data.get("id", "UNKNOWN"))
-        title = str(product_data.get("title", "Unknown Product"))[:150]
-        description = str(product_data.get("description", "No description available"))[:5000]
-        
-        # Helper function to safely convert values to strings
-        def safe_str_or_none(value):
-            return str(value) if value is not None else None
-        
-        # Create basic product feed item
-        feed_item = ProductFeedItem(
-            # OpenAI Flags
-            enable_search=EnableSearchEnum.TRUE,
-            enable_checkout=EnableCheckoutEnum.FALSE,  # Default to false for safety
+        # The API returns data that matches the user's Pydantic model JSON schema
+        # We trust this structure and create the ProductFeedItem directly
+        try:
+            feed_item = ProductFeedItem(**product_data)
+            return feed_item
+        except Exception as e:
+            # If direct creation fails, it means the user model doesn't match ProductFeedItem
+            # This is expected - we need to map from user model to ProductFeedItem
+            error_console.print(f"[yellow]Warning: User model structure doesn't match ProductFeedItem, using field mapping: {e}[/yellow]")
             
-            # Basic Product Data
-            id=product_id,
-            title=title,
-            description=description,
-            link="https://example.com/product/" + product_id,  # Placeholder URL
+            # Map common fields from user model to ProductFeedItem
+            mapped_data = {
+                # Required fields with fallbacks
+                "enable_search": "true",
+                "enable_checkout": "false",
+                "id": str(product_data.get("id", "UNKNOWN")),
+                "title": str(product_data.get("title", "Unknown Product"))[:150],
+                "description": str(product_data.get("description", "No description available"))[:5000],
+                "link": f"https://example.com/product/{product_data.get('id', 'unknown')}",
+                "price": str(product_data.get("price", "0.00 USD")),
+                "availability": "in_stock",
+                "inventory_quantity": 1,
+                "seller_name": "Example Store",
+                "seller_url": "https://example.com/store",
+                "return_policy": "https://example.com/returns",
+                "return_window": 30,
+            }
             
-            # Optional fields - handle any field from user model generically
-            brand=safe_str_or_none(product_data.get("brand")),
-            product_category=safe_str_or_none(product_data.get("product_category")),
-            material=safe_str_or_none(product_data.get("material")),
-            weight=safe_str_or_none(product_data.get("weight")),
+            # Map optional fields that might exist in user model
+            optional_mappings = {
+                "brand": "brand",
+                "product_category": "product_category", 
+                "material": "material",
+                "weight": "weight"
+            }
             
-            # Price (required) - ensure it's always a string
-            price=str(product_data.get("price") or "0.00 USD"),
+            for feed_field, user_field in optional_mappings.items():
+                if user_field in product_data and product_data[user_field] is not None:
+                    mapped_data[feed_field] = str(product_data[user_field])
             
-            # Availability (required)
-            availability=AvailabilityEnum.IN_STOCK,
-            inventory_quantity=1,  # Default quantity
-            
-            # Merchant Info (required)
-            seller_name="Example Store",  # Placeholder
-            seller_url="https://example.com/store",  # Placeholder
-            
-            # Returns (required)
-            return_policy="https://example.com/returns",  # Placeholder
-            return_window=30,  # Default 30 days
-        )
-        
-        return feed_item
+            return ProductFeedItem(**mapped_data)
     
     def generate_product_feed(
         self, 
