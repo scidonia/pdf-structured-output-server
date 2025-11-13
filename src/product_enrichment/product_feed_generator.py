@@ -21,15 +21,11 @@ from .models import (
 # Import user-configurable product model
 import sys
 from pathlib import Path
+import importlib
 
 # Add the project root to Python path to find models directory
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
-
-try:
-    from models.models import ProductExtractionModel
-except ImportError:
-    raise ImportError("Product extraction model not found. Please ensure models/models.py exists with ProductExtractionModel defined.")
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -39,15 +35,42 @@ error_console = Console(stderr=True)
 class ProductFeedGenerator:
     """Generates product feed data using BookWyrm API."""
     
+    def _load_extraction_model(self, model_name: str):
+        """Dynamically load the specified extraction model.
+        
+        Args:
+            model_name: Name of the model class to load from models.models
+            
+        Returns:
+            The loaded Pydantic model class
+        """
+        try:
+            models_module = importlib.import_module("models.models")
+            model_class = getattr(models_module, model_name)
+            
+            # Verify it's a Pydantic model
+            if not hasattr(model_class, 'model_fields'):
+                raise ValueError(f"{model_name} is not a valid Pydantic model")
+            
+            return model_class
+            
+        except ImportError:
+            raise ImportError("Product extraction models not found. Please ensure models/models.py exists.")
+        except AttributeError:
+            raise AttributeError(f"Model '{model_name}' not found in models/models.py. Available models should be defined as Pydantic BaseModel classes.")
+    
     def __init__(self, config: ProcessingConfig):
         """Initialize generator with configuration.
         
         Args:
-            config: Processing configuration including API key
+            config: Processing configuration including API key and model name
         """
         self.config = config
         if config.api_key != "dummy":  # Allow dummy key for validation-only usage
             self.client = BookWyrmClient(api_key=config.api_key)
+        
+        # Dynamically import the specified model
+        self.extraction_model = self._load_extraction_model(config.model_name)
     
     def _extract_pdf_with_bookwyrm(self, pdf_path: Path) -> str:
         """Extract text from PDF using BookWyrm API.
@@ -137,7 +160,7 @@ class ProductFeedGenerator:
             
             stream = self.client.stream_summarize(
                 phrases=phrases,
-                summary_class=ProductExtractionModel,
+                summary_class=self.extraction_model,
                 model_strength="wise",
                 debug=False
             )
@@ -161,7 +184,7 @@ class ProductFeedGenerator:
                     json_data = json.loads(final_result.summary)
                     
                     # Create the user's model from the parsed JSON
-                    model_instance = ProductExtractionModel(**json_data)
+                    model_instance = self.extraction_model(**json_data)
                     product_data = model_instance.model_dump()
                     
                 except json.JSONDecodeError as json_error:
@@ -185,7 +208,7 @@ class ProductFeedGenerator:
                     }
                     # Add None values for any other fields defined in the model
                     try:
-                        model_fields = ProductExtractionModel.model_fields
+                        model_fields = self.extraction_model.model_fields
                         for field_name in model_fields:
                             if field_name not in fallback_data:
                                 fallback_data[field_name] = None
@@ -340,10 +363,10 @@ class ProductFeedGenerator:
             output_path: Path for output CSV file
         """
         try:
-            # Use reflection to get all possible fields from the user's ProductExtractionModel
+            # Use reflection to get all possible fields from the user's extraction model
             model_fields = {}
             try:
-                model_fields = ProductExtractionModel.model_fields
+                model_fields = self.extraction_model.model_fields
             except Exception:
                 # If we can't get model fields, we'll just use the data as-is
                 pass

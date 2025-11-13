@@ -45,6 +45,11 @@ def process(
         "--batch-size",
         help="Number of PDFs to process in parallel"
     ),
+    model_name: str = typer.Option(
+        "ProductExtractionModel",
+        "--model-name",
+        help="Name of the Pydantic model class to use for extraction (must be defined in models/models.py)"
+    ),
 ) -> None:
     """Process PDF documents and generate a product feed CSV file.
     
@@ -69,7 +74,8 @@ def process(
     config = ProcessingConfig(
         api_key=api_key,
         max_tokens=max_tokens,
-        batch_size=batch_size
+        batch_size=batch_size,
+        model_name=model_name
     )
     
     generator = ProductFeedGenerator(config)

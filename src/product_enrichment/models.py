@@ -21,6 +21,10 @@ class ProcessingConfig(BaseModel):
         5,
         description="Number of PDFs to process in parallel"
     )
+    model_name: str = Field(
+        "ProductExtractionModel",
+        description="Name of the Pydantic model class to use for extraction"
+    )
 
 
 class EnableSearchEnum(str, Enum):
