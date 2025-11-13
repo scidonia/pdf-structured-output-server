@@ -8,6 +8,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskPr
 
 from .product_feed_generator import ProductFeedGenerator
 from .models import ProcessingConfig
+from .server import ProductEnrichmentServer
 
 app = typer.Typer(help="Process PDF documents and generate product feed CSV using BookWyrm API")
 console = Console()
@@ -121,6 +122,60 @@ def validate(
             
     except Exception as e:
         error_console.print(f"[red]Error validating CSV: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def serve(
+    api_key: Optional[str] = typer.Option(
+        None,
+        "--api-key",
+        envvar="BOOKWYRM_API_KEY",
+        help="BookWyrm API key (can also be set via BOOKWYRM_API_KEY env var)"
+    ),
+    host: str = typer.Option(
+        "0.0.0.0",
+        "--host",
+        help="Host to bind the server to"
+    ),
+    port: int = typer.Option(
+        8000,
+        "--port",
+        help="Port to bind the server to"
+    ),
+    workers: int = typer.Option(
+        5,
+        "--workers",
+        help="Number of parallel workers for processing PDFs"
+    ),
+) -> None:
+    """Start the product enrichment API server.
+    
+    The server provides an endpoint that accepts:
+    - Multiple PDF files via multipart form
+    - A JSON schema for extraction
+    - A schema name
+    
+    Returns streaming SSE responses with extraction results.
+    """
+    if not api_key:
+        error_console.print("[red]Error: BookWyrm API key is required. Set BOOKWYRM_API_KEY environment variable or use --api-key option.[/red]")
+        raise typer.Exit(1)
+    
+    console.print(f"[green]Starting Product Enrichment API server...[/green]")
+    console.print(f"[blue]Host: {host}[/blue]")
+    console.print(f"[blue]Port: {port}[/blue]")
+    console.print(f"[blue]Workers: {workers}[/blue]")
+    console.print(f"[yellow]API endpoint: http://{host}:{port}/process[/yellow]")
+    console.print(f"[yellow]Health check: http://{host}:{port}/health[/yellow]")
+    
+    try:
+        server = ProductEnrichmentServer(api_key=api_key, max_workers=workers)
+        server.run(host=host, port=port)
+    except KeyboardInterrupt:
+        console.print(f"[yellow]Server stopped by user[/yellow]")
+    except Exception as e:
+        error_console.print(f"[red]Error starting server: {e}[/red]")
         raise typer.Exit(1)
 
 
