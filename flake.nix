@@ -1,5 +1,5 @@
 {
-  description = "product-enrichment";
+  description = "pdf-structured-output-server";
 
   inputs = {
     flake-parts.url = "github:hercules-ci/flake-parts";

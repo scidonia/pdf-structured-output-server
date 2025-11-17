@@ -1,6 +1,10 @@
-# Product Enrichment
+# PDF Structured Output Server & CLI Tool
 
-A CLI tool for processing PDF documents and generating structured product feed CSV files using the BookWyrm API. This tool extracts text from PDFs, uses AI to identify product information, and outputs data conforming to the OpenAI commerce feed specification.
+A CLI tool for processing PDF documents and generating structured JSON & CSV output using the BookWyrm API. Examples of it's use include enriching product data from brochures and exporting this to CSV files and processing invoices automate data entry. 
+
+The CLI tool extracts text from PDFs, uses AI to identify product information, and outputs data conforming to the OpenAI commerce feed specification. 
+
+Using the API server, you can specify your own Pydantic models to send with requests to output data in a format that matches your requirements.
 
 ## Features
 
@@ -36,7 +40,7 @@ Alternatively, you can pass the API key directly using the `--api-key` option.
 Process all PDF files in a directory and generate a product feed CSV:
 
 ```bash
-product-enrichment process ./docs --output products.csv
+uv run pdf-server process ./docs --output products.csv
 ```
 
 #### Options
@@ -50,7 +54,7 @@ product-enrichment process ./docs --output products.csv
 
 ```bash
 # Process PDFs with custom settings
-product-enrichment process ./documents \
+uv run pdf-server process ./documents \
   --output my_products.csv \
   --max-tokens 3000 \
   --batch-size 3
@@ -61,7 +65,7 @@ product-enrichment process ./documents \
 Validate a generated CSV file against the OpenAI commerce feed specification:
 
 ```bash
-product-enrichment validate products.csv
+uv run pdf-server validate products.csv
 ```
 
 This will check for:
@@ -75,7 +79,13 @@ This will check for:
 Start the server for API-based processing:
 
 ```bash
-product-enrichment serve --host 0.0.0.0 --port 8000
+uv run pdf-server serve --host 0.0.0.0 --port 8000
+```
+
+Alternatively, activate the virtual environment first:
+```bash
+source .venv/bin/activate
+pdf-server serve --host 0.0.0.0 --port 8000
 ```
 
 #### Process PDFs via API
@@ -191,15 +201,15 @@ Run the CLI to test functionality:
 
 ```bash
 # Test help output
-product-enrichment --help
+uv run pdf-server --help
 
 # Test with sample PDFs
 mkdir -p test_docs
 # Add some PDF files to test_docs/
-product-enrichment process test_docs --output test_output.csv
+uv run pdf-server process test_docs --output test_output.csv
 
 # Validate the output
-product-enrichment validate test_output.csv
+uv run pdf-server validate test_output.csv
 ```
 
 ## Requirements

@@ -21,4 +21,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
-product-enrichment = "product_enrichment.main:app"
+pdf-server = "product_enrichment.main:app"
